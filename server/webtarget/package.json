@@ -16,6 +16,13 @@
     "deep-extend": "0.5.1",
     "lodash": "4.17.12"
   },
+  "overrides": {
+    "deep-extend": ">=0.5.1",
+    "lodash": ">=4.17.21",
+    "getobject": ">=1.0.0",
+    "minimist@<1.0.0": ">=0.2.4",
+    "minimist@>=1.0.0": ">=1.2.6"
+  },
   "scripts": {
     "npm-force-resolutions": "node ./node/node_modules/npm/bin/npx-cli.js --userconfig .npmrc npm-force-resolutions"
   }
