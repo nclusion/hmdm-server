@@ -101,6 +101,13 @@ public class ConfigurationDAO extends AbstractLinkedDAO<Configuration, Applicati
         return c != null;
     }
 
+    private String sanitizeForLog(String value) {
+        if (value == null) {
+            return null;
+        }
+        return value.replace('\n', '_').replace('\r', '_');
+    }
+
     private boolean isSafeExternalUrl(String externalUrl) {
         try {
             URI uri = new URI(externalUrl);
@@ -205,11 +212,12 @@ public class ConfigurationDAO extends AbstractLinkedDAO<Configuration, Applicati
                                             file.setChecksum(checksum);
                                         } else {
                                             log.warn("Rejected unsafe external URL for configuration file checksum calculation: {}",
-                                                    file.getExternalUrl());
+                                                    sanitizeForLog(file.getExternalUrl()));
                                             file.setChecksum("");
                                         }
                                     } catch (NoSuchAlgorithmException | IOException e) {
-                                        log.error("Failed to calculate checksum for content URL: {}", file.getExternalUrl(), e);
+                                        log.error("Failed to calculate checksum for content URL: {}",
+                                                sanitizeForLog(file.getExternalUrl()), e);
                                         file.setChecksum("");
                                     }
                                 });
