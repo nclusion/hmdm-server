@@ -24,10 +24,14 @@ package com.hmdm.persistence;
 import com.google.inject.Inject;
 
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URL;
 import java.security.NoSuchAlgorithmException;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import com.google.inject.Singleton;
@@ -95,6 +99,36 @@ public class ConfigurationDAO extends AbstractLinkedDAO<Configuration, Applicati
         Configuration c = getSingleRecordWithCurrentUser(currentUser ->
                 this.mapper.checkConfigurationAccess(currentUser.getCustomerId(), currentUser.getId(), configurationId));
         return c != null;
+    }
+
+    private boolean isSafeExternalUrl(String externalUrl) {
+        try {
+            URI uri = new URI(externalUrl);
+            String scheme = uri.getScheme();
+            String host = uri.getHost();
+
+            if (scheme == null || host == null) {
+                return false;
+            }
+
+            String normalizedScheme = scheme.toLowerCase(Locale.ROOT);
+            if (!"http".equals(normalizedScheme) && !"https".equals(normalizedScheme)) {
+                return false;
+            }
+
+            InetAddress address = InetAddress.getByName(host);
+            return !isPrivateOrLocalAddress(address);
+        } catch (URISyntaxException | IOException e) {
+            return false;
+        }
+    }
+
+    private boolean isPrivateOrLocalAddress(InetAddress address) {
+        return address.isAnyLocalAddress()
+                || address.isLoopbackAddress()
+                || address.isLinkLocalAddress()
+                || address.isSiteLocalAddress()
+                || address.isMulticastAddress();
     }
 
     public void insertConfiguration(Configuration config) {
@@ -166,9 +200,13 @@ public class ConfigurationDAO extends AbstractLinkedDAO<Configuration, Applicati
                                         ConfigurationFile legacyFile = legacyFilesMap.get(file.getId());
                                         if (legacyFile != null && file.getExternalUrl().equals(legacyFile.getExternalUrl())) {
                                             file.setChecksum(legacyFile.getChecksum());
-                                        } else {
+                                        } else if (isSafeExternalUrl(file.getExternalUrl())) {
                                             final String checksum = CryptoUtil.calculateChecksum(new URL(file.getExternalUrl()).openStream());
                                             file.setChecksum(checksum);
+                                        } else {
+                                            log.warn("Rejected unsafe external URL for configuration file checksum calculation: {}",
+                                                    file.getExternalUrl());
+                                            file.setChecksum("");
                                         }
                                     } catch (NoSuchAlgorithmException | IOException e) {
                                         log.error("Failed to calculate checksum for content URL: {}", file.getExternalUrl(), e);
