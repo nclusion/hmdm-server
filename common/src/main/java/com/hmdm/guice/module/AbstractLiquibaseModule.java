@@ -26,15 +26,13 @@ import liquibase.Liquibase;
 import liquibase.database.Database;
 import liquibase.database.DatabaseFactory;
 import liquibase.database.jvm.JdbcConnection;
-import liquibase.exception.LiquibaseException;
-import liquibase.resource.ResourceAccessor;
+import liquibase.resource.ClassLoaderResourceAccessor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.servlet.ServletContext;
 import java.sql.Connection;
 import java.sql.DriverManager;
-import java.sql.SQLException;
 
 /**
  * <p>An abstract module used for initializing or modifying the database based on the provided Liquibase change log.</p>
@@ -67,13 +65,14 @@ public abstract class AbstractLiquibaseModule extends AbstractModule {
      * database.</p>
      */
     protected final void configure() {
-        try (Connection connection = this.getConnection()) {
+        try (Connection connection = this.getConnection();
+             ClassLoaderResourceAccessor resourceAccessor = new ClassLoaderResourceAccessor()) {
             Database database = DatabaseFactory.getInstance().findCorrectDatabaseImplementation(new JdbcConnection(connection));
-            Liquibase liquibase = new Liquibase(getChangeLogResourcePath(), getResourceAccessor(), database);
+            Liquibase liquibase = new Liquibase(getChangeLogResourcePath(), resourceAccessor, database);
             String usageScenario = this.context.getInitParameter("usage.scenario");
             String contexts = getContexts(usageScenario);
             liquibase.update(contexts);
-        } catch (LiquibaseException | SQLException e) {
+        } catch (Exception e) {
             log.error(e.getMessage(), e);
             throw new RuntimeException(e);
         }
@@ -99,18 +98,19 @@ public abstract class AbstractLiquibaseModule extends AbstractModule {
     /**
      * <p>Gets the path to the DB change log to be used by this module.</p>
      *
-     * <p>Plugins MUST override this method to provide the path to specific Db change log.</p>
+     * <p>The path is read from the classpath, so it must be relative and must have no leading slash, for example
+     * <code>liquibase/audit.changelog.xml</code>. The path must find exactly one resource on the classpath of the
+     * deployed application, which holds the change log of every module.</p>
+     *
+     * <p>The path is not the value that Liquibase writes to the <code>FILENAME</code> column of
+     * <code>DATABASECHANGELOG</code>. The change log sets that value with its <code>logicalFilePath</code>
+     * attribute, which every change log must declare. Liquibase matches an applied change set on that value, so a
+     * change log that drops the attribute makes Liquibase apply every change set again to a database that already
+     * has the tables.</p>
      *
      * @return a path to resource with Db change log.
      */
     protected abstract String getChangeLogResourcePath();
-
-    /**
-     * <p>Gets the resource accessor to be uused for loading the change log file.</p>
-     *
-     * @return a resource accessor for change log file.
-     */
-    protected abstract ResourceAccessor getResourceAccessor();
 
     /**
      * <p>Connects to target database using the parameters from the context.</p>
