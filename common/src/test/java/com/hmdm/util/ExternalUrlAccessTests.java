@@ -66,6 +66,41 @@ public class ExternalUrlAccessTests {
     }
 
     @Test
+    public void blockedRangeBoundariesAreExact() throws Exception {
+        // CGNAT 100.64.0.0/10: both edges blocked, both neighbors allowed
+        Assert.assertFalse(ExternalUrlAccess.isBlockedAddress(InetAddress.getByName("100.63.255.255")));
+        Assert.assertTrue(ExternalUrlAccess.isBlockedAddress(InetAddress.getByName("100.64.0.0")));
+        Assert.assertTrue(ExternalUrlAccess.isBlockedAddress(InetAddress.getByName("100.127.255.255")));
+        Assert.assertFalse(ExternalUrlAccess.isBlockedAddress(InetAddress.getByName("100.128.0.0")));
+
+        // IPv6 ULA fc00::/7: neighbors on both sides allowed
+        Assert.assertFalse(ExternalUrlAccess.isBlockedAddress(InetAddress.getByName("fbff::1")));
+        Assert.assertFalse(ExternalUrlAccess.isBlockedAddress(InetAddress.getByName("fe00::1")));
+    }
+
+    @Test
+    public void rejectsIpv6LoopbackAndIpv4MappedForms() throws Exception {
+        Assert.assertTrue(ExternalUrlAccess.isBlockedAddress(InetAddress.getByName("::1")));
+        Assert.assertTrue(ExternalUrlAccess.isBlockedAddress(InetAddress.getByName("::ffff:10.0.0.1")));
+
+        Assert.assertFalse(ExternalUrlAccess.isSafeExternalUrl("http://[::1]/"));
+        Assert.assertFalse(ExternalUrlAccess.isSafeExternalUrl("http://[::ffff:169.254.169.254]/"));
+    }
+
+    @Test
+    public void anyBlockedResolvedAddressRejectsTheWholeUrl() throws Exception {
+        InetAddress publicOne = InetAddress.getByName("8.8.8.8");
+        InetAddress publicTwo = InetAddress.getByName("1.1.1.1");
+        InetAddress blocked = InetAddress.getByName("10.0.0.1");
+
+        Assert.assertTrue(ExternalUrlAccess.allAddressesSafe(new InetAddress[]{publicOne, publicTwo}));
+        Assert.assertFalse(ExternalUrlAccess.allAddressesSafe(new InetAddress[]{publicOne, blocked}));
+        Assert.assertFalse(ExternalUrlAccess.allAddressesSafe(new InetAddress[]{blocked, publicOne}));
+        Assert.assertFalse(ExternalUrlAccess.allAddressesSafe(new InetAddress[]{}));
+        Assert.assertFalse(ExternalUrlAccess.allAddressesSafe(null));
+    }
+
+    @Test
     public void allowsPublicUnicastLiterals() throws Exception {
         Assert.assertFalse(ExternalUrlAccess.isBlockedAddress(InetAddress.getByName("8.8.8.8")));
         Assert.assertFalse(ExternalUrlAccess.isBlockedAddress(InetAddress.getByName("1.1.1.1")));
@@ -74,10 +109,14 @@ public class ExternalUrlAccessTests {
     }
 
     @Test
-    public void httpConnectionDisablesRedirectFollowing() throws Exception {
+    public void httpConnectionDisablesRedirectsAndSetsTimeouts() throws Exception {
         HttpURLConnection connection = ExternalUrlAccess.createHttpConnection(new URL("http://example.com/"));
         try {
             Assert.assertFalse(connection.getInstanceFollowRedirects());
+            Assert.assertEquals(30000, connection.getConnectTimeout());
+            Assert.assertEquals(30000, connection.getReadTimeout());
+            Assert.assertFalse(connection.getUseCaches());
+            Assert.assertFalse(connection.getAllowUserInteraction());
         } finally {
             connection.disconnect();
         }
