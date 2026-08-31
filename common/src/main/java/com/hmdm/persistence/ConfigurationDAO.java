@@ -24,7 +24,6 @@ package com.hmdm.persistence;
 import com.google.inject.Inject;
 
 import java.io.IOException;
-import java.net.URL;
 import java.security.NoSuchAlgorithmException;
 import java.util.HashMap;
 import java.util.List;
@@ -43,6 +42,7 @@ import com.hmdm.persistence.domain.ConfigurationApplicationParameters;
 import com.hmdm.persistence.mapper.ConfigurationMapper;
 import com.hmdm.security.SecurityException;
 import com.hmdm.util.CryptoUtil;
+import com.hmdm.util.ExternalUrlAccess;
 import org.mybatis.guice.transactional.Transactional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -112,10 +112,18 @@ public class ConfigurationDAO extends AbstractLinkedDAO<Configuration, Applicati
                         .filter(file -> file.getExternalUrl() != null)
                         .forEach(file -> {
                             try {
-                                final String checksum = CryptoUtil.calculateChecksum(new URL(file.getExternalUrl()).openStream());
-                                file.setChecksum(checksum);
+                                if (ExternalUrlAccess.isSafeExternalUrl(file.getExternalUrl())) {
+                                    final String checksum = CryptoUtil.calculateChecksum(
+                                            ExternalUrlAccess.openValidatedStream(file.getExternalUrl()));
+                                    file.setChecksum(checksum);
+                                } else {
+                                    log.warn("Rejected unsafe external URL for configuration file checksum calculation: {}",
+                                            ExternalUrlAccess.sanitizeForLog(file.getExternalUrl()));
+                                    file.setChecksum("");
+                                }
                             } catch (NoSuchAlgorithmException | IOException e) {
-                                log.error("Failed to calculate checksum for content URL: {}", file.getExternalUrl(), e);
+                                log.error("Failed to calculate checksum for content URL: {}",
+                                        ExternalUrlAccess.sanitizeForLog(file.getExternalUrl()), e);
                                 file.setChecksum("");
                             }
                         });
@@ -168,12 +176,18 @@ public class ConfigurationDAO extends AbstractLinkedDAO<Configuration, Applicati
                                         ConfigurationFile legacyFile = legacyFilesMap.get(file.getId());
                                         if (legacyFile != null && file.getExternalUrl().equals(legacyFile.getExternalUrl())) {
                                             file.setChecksum(legacyFile.getChecksum());
-                                        } else {
-                                            final String checksum = CryptoUtil.calculateChecksum(new URL(file.getExternalUrl()).openStream());
+                                        } else if (ExternalUrlAccess.isSafeExternalUrl(file.getExternalUrl())) {
+                                            final String checksum = CryptoUtil.calculateChecksum(
+                                                    ExternalUrlAccess.openValidatedStream(file.getExternalUrl()));
                                             file.setChecksum(checksum);
+                                        } else {
+                                            log.warn("Rejected unsafe external URL for configuration file checksum calculation: {}",
+                                                    ExternalUrlAccess.sanitizeForLog(file.getExternalUrl()));
+                                            file.setChecksum("");
                                         }
                                     } catch (NoSuchAlgorithmException | IOException e) {
-                                        log.error("Failed to calculate checksum for content URL: {}", file.getExternalUrl(), e);
+                                        log.error("Failed to calculate checksum for content URL: {}",
+                                                ExternalUrlAccess.sanitizeForLog(file.getExternalUrl()), e);
                                         file.setChecksum("");
                                     }
                                 });
