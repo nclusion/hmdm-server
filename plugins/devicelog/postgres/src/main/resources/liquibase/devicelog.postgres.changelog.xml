@@ -111,4 +111,19 @@
         </rollback>
     </changeSet>
 
+    <changeSet id="plugin-devicelog-09.09.2026-12:00" author="nclusion" context="common" runInTransaction="false">
+        <comment>CHW-332: index the device-log search read path. The HMDM panel's
+            device-log views filter plugin_devicelog_log by deviceId and page by
+            createTime DESC; without an index every search seq-scans the table.
+            CONCURRENTLY (hence runInTransaction=false) so the build never blocks
+            the device-log insert path on a large production table.</comment>
+        <sql>
+            CREATE INDEX CONCURRENTLY IF NOT EXISTS plugin_devicelog_log_deviceid_createtime_idx
+            ON plugin_devicelog_log (deviceId, createTime DESC);
+        </sql>
+        <rollback>
+            DROP INDEX IF EXISTS plugin_devicelog_log_deviceid_createtime_idx;
+        </rollback>
+    </changeSet>
+
 </databaseChangeLog>
