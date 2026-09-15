@@ -116,8 +116,12 @@
             device-log views filter plugin_devicelog_log by deviceId and page by
             createTime DESC; without an index every search seq-scans the table.
             CONCURRENTLY (hence runInTransaction=false) so the build never blocks
-            the device-log insert path on a large production table.</comment>
+            the device-log insert path on a large production table. The leading
+            DROP clears the INVALID index an interrupted CONCURRENTLY build
+            leaves behind, which IF NOT EXISTS would silently keep; it only runs
+            on retry — a succeeded changeset never re-executes.</comment>
         <sql>
+            DROP INDEX CONCURRENTLY IF EXISTS plugin_devicelog_log_deviceid_createtime_idx;
             CREATE INDEX CONCURRENTLY IF NOT EXISTS plugin_devicelog_log_deviceid_createtime_idx
             ON plugin_devicelog_log (deviceId, createTime DESC);
         </sql>
