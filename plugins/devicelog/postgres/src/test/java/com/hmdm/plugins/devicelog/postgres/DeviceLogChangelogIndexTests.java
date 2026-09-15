@@ -39,15 +39,19 @@ import org.junit.Test;
  * plugin_devicelog_log's base table definition creates only the primary
  * key, so without a secondary index the HMDM panel's device-log search
  * seq-scans the table: the read path joins plugin_devicelog_log to devices
- * on deviceId and orders by createTime DESC. The plugin changelog must
- * carry a (deviceId, createTime DESC) index built CONCURRENTLY behind a
- * leading DROP that clears the INVALID index an interrupted build leaves
- * behind. Parsing through Liquibase's own XML parser proves the changelog
- * stays loadable by the runtime, not merely well-formed.
+ * on deviceId and orders by createTime DESC, and the scheduled retention
+ * purge deletes by a bare createTime bound the search index cannot serve.
+ * The plugin changelog must carry a (deviceId, createTime DESC) index for
+ * the search path and a (createTime) index for the purge, each built
+ * CONCURRENTLY behind a leading DROP that clears the INVALID index an
+ * interrupted build leaves behind. Parsing through Liquibase's own XML
+ * parser proves the changelog stays loadable by the runtime, not merely
+ * well-formed.
  */
 public class DeviceLogChangelogIndexTests {
 
     private static final String CHANGESET_ID = "plugin-devicelog-09.09.2026-12:00";
+    private static final String PURGE_CHANGESET_ID = "plugin-devicelog-09.15.2026-12:00";
 
     private static DatabaseChangeLog parseChangeLog() throws Exception {
         return new XMLChangeLogSAXParser().parse(
@@ -75,36 +79,46 @@ public class DeviceLogChangelogIndexTests {
         return sql.toString().toLowerCase().replaceAll("\\s+", " ").trim();
     }
 
-    @Test
-    public void deviceLogSearchIndex() throws Exception {
+    private static void assertConcurrentIndexChangeSet(
+            String changeSetId, String indexName, String indexedColumns) throws Exception {
         DatabaseChangeLog log = parseChangeLog();
-        ChangeSet changeSet = findById(log, CHANGESET_ID);
-        assertNotNull("changeSet " + CHANGESET_ID
+        ChangeSet changeSet = findById(log, changeSetId);
+        assertNotNull("changeSet " + changeSetId
                 + " is missing from devicelog.postgres.changelog.xml", changeSet);
-        assertEquals("changeSet " + CHANGESET_ID + " must keep author \"nclusion\": Liquibase"
+        assertEquals("changeSet " + changeSetId + " must keep author \"nclusion\": Liquibase"
                 + " identifies a changeset by (id, author, path), so an author change re-executes"
                 + " it on every deployed database",
                 "nclusion", changeSet.getAuthor());
-        assertFalse("changeSet " + CHANGESET_ID + " must set runInTransaction=\"false\" so"
+        assertFalse("changeSet " + changeSetId + " must set runInTransaction=\"false\" so"
                 + " CREATE INDEX CONCURRENTLY can run outside a transaction",
                 changeSet.isRunInTransaction());
-        assertTrue("changeSet " + CHANGESET_ID + " must run in the common context like its siblings",
+        assertTrue("changeSet " + changeSetId + " must run in the common context like its siblings",
                 changeSet.getContexts().getContexts().contains("common"));
         String sql = normalizedSql(changeSet);
-        String expectedDropSql =
-                "drop index concurrently if exists plugin_devicelog_log_deviceid_createtime_idx";
-        String expectedCreateSql = "create index concurrently if not exists"
-                + " plugin_devicelog_log_deviceid_createtime_idx"
-                + " on plugin_devicelog_log (deviceid, createtime desc)";
-        assertTrue("changeSet " + CHANGESET_ID + " SQL must contain \"" + expectedDropSql
+        String expectedDropSql = "drop index concurrently if exists " + indexName;
+        String expectedCreateSql = "create index concurrently if not exists " + indexName
+                + " on plugin_devicelog_log (" + indexedColumns + ")";
+        assertTrue("changeSet " + changeSetId + " SQL must contain \"" + expectedDropSql
                 + "\" but was: " + sql,
                 sql.contains(expectedDropSql));
-        assertTrue("changeSet " + CHANGESET_ID + " SQL must contain \"" + expectedCreateSql
+        assertTrue("changeSet " + changeSetId + " SQL must contain \"" + expectedCreateSql
                 + "\" but was: " + sql,
                 sql.contains(expectedCreateSql));
-        assertTrue("changeSet " + CHANGESET_ID + " must DROP before CREATE so a retry clears the"
+        assertTrue("changeSet " + changeSetId + " must DROP before CREATE so a retry clears the"
                 + " INVALID index an interrupted CONCURRENTLY build leaves behind, which"
                 + " IF NOT EXISTS alone would silently keep; SQL was: " + sql,
                 sql.indexOf(expectedDropSql) < sql.indexOf(expectedCreateSql));
+    }
+
+    @Test
+    public void deviceLogSearchIndex() throws Exception {
+        assertConcurrentIndexChangeSet(CHANGESET_ID,
+                "plugin_devicelog_log_deviceid_createtime_idx", "deviceid, createtime desc");
+    }
+
+    @Test
+    public void deviceLogPurgeIndex() throws Exception {
+        assertConcurrentIndexChangeSet(PURGE_CHANGESET_ID,
+                "plugin_devicelog_log_createtime_idx", "createtime");
     }
 }
