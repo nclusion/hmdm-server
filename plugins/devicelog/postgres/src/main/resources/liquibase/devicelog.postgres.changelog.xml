@@ -111,4 +111,26 @@
         </rollback>
     </changeSet>
 
+    <changeSet id="plugin-devicelog-09.09.2026-12:00" author="nclusion" context="common" runInTransaction="false">
+        <comment>Index the device-log search read path. The HMDM panel's
+            device-log queries join plugin_devicelog_log to devices on deviceId
+            and order by createTime DESC; the base table creates only its
+            primary key, so every search seq-scans the table. CONCURRENTLY
+            (hence runInTransaction=false) so the build never blocks the
+            device-log insert path on a large production table. The leading
+            DROP also runs on a first deploy, where it replaces any same-named
+            index with this definition; it exists for the retry after an
+            interrupted CONCURRENTLY build, which leaves an INVALID index that
+            IF NOT EXISTS alone would silently keep. A succeeded changeset
+            never re-executes.</comment>
+        <sql>
+            DROP INDEX CONCURRENTLY IF EXISTS plugin_devicelog_log_deviceid_createtime_idx;
+            CREATE INDEX CONCURRENTLY IF NOT EXISTS plugin_devicelog_log_deviceid_createtime_idx
+            ON plugin_devicelog_log (deviceId, createTime DESC);
+        </sql>
+        <rollback>
+            DROP INDEX IF EXISTS plugin_devicelog_log_deviceid_createtime_idx;
+        </rollback>
+    </changeSet>
+
 </databaseChangeLog>

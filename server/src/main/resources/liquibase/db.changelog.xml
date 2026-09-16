@@ -2539,5 +2539,37 @@
         </rollback>
     </changeSet>
 
+    <changeSet id="09.09.26-12:00" author="nclusion" context="common" runInTransaction="false">
+        <comment>Index devices.oldNumber (AlloyDB index advisor).
+            CONCURRENTLY (hence runInTransaction=false) so the build never blocks
+            writes on a live database. The leading DROP also runs on a first
+            deploy, where it replaces any same-named index with this definition;
+            it exists for the retry after an interrupted CONCURRENTLY build,
+            which leaves an INVALID index that IF NOT EXISTS alone would
+            silently keep. A succeeded changeset never re-executes.</comment>
+        <sql>
+            DROP INDEX CONCURRENTLY IF EXISTS devices_oldnumber_idx;
+            CREATE INDEX CONCURRENTLY IF NOT EXISTS devices_oldnumber_idx
+            ON devices (oldNumber);
+        </sql>
+        <rollback>
+            DROP INDEX IF EXISTS devices_oldnumber_idx;
+        </rollback>
+    </changeSet>
+
+    <changeSet id="09.09.26-12:01" author="nclusion" context="common" runInTransaction="false">
+        <comment>Index configurationApplications.applicationVersionId (AlloyDB
+            index advisor, 3 query shapes). CONCURRENTLY build behind a leading
+            DROP; see changeset 09.09.26-12:00 for the rationale.</comment>
+        <sql>
+            DROP INDEX CONCURRENTLY IF EXISTS configurationapplications_applicationversionid_idx;
+            CREATE INDEX CONCURRENTLY IF NOT EXISTS configurationapplications_applicationversionid_idx
+            ON configurationApplications (applicationVersionId);
+        </sql>
+        <rollback>
+            DROP INDEX IF EXISTS configurationapplications_applicationversionid_idx;
+        </rollback>
+    </changeSet>
+
 
 </databaseChangeLog>
