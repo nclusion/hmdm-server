@@ -133,4 +133,19 @@
         </rollback>
     </changeSet>
 
+    <changeSet id="plugin-devicelog-09.15.2026-12:00" author="nclusion" context="common" runInTransaction="false">
+        <comment>Index the retention purge's createTime bound. Built
+            CONCURRENTLY (hence runInTransaction=false) behind a leading
+            DROP, in the same self-healing shape as the changeset
+            above.</comment>
+        <sql>
+            DROP INDEX CONCURRENTLY IF EXISTS plugin_devicelog_log_createtime_idx;
+            CREATE INDEX CONCURRENTLY IF NOT EXISTS plugin_devicelog_log_createtime_idx
+            ON plugin_devicelog_log (createTime);
+        </sql>
+        <rollback>
+            DROP INDEX IF EXISTS plugin_devicelog_log_createtime_idx;
+        </rollback>
+    </changeSet>
+
 </databaseChangeLog>
