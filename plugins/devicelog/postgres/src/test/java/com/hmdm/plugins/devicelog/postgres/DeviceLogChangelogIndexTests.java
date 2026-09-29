@@ -111,9 +111,11 @@ public class DeviceLogChangelogIndexTests {
 
     /**
      * purgeLogRecords deletes by a bare createTime predicate, which the
-     * (deviceId, createTime DESC) search index cannot serve. The changelog must
-     * carry a plain createTime index with the same CONCURRENTLY / leading-DROP
-     * shape, or every daily purge seq-scans the table on the prod primary.
+     * (deviceId, createTime DESC) search index cannot serve. Its cutoff comes
+     * from EXTRACT(EPOCH ...) and is numeric, so the planner filters on
+     * (createTime)::numeric; the changelog must carry an index on exactly that
+     * expression, with the same CONCURRENTLY / leading-DROP shape, or every
+     * daily purge seq-scans the table on the prod primary.
      */
     @Test
     public void deviceLogPurgeIndex() throws Exception {
@@ -135,7 +137,7 @@ public class DeviceLogChangelogIndexTests {
                 "drop index concurrently if exists plugin_devicelog_log_createtime_idx";
         String expectedCreateSql = "create index concurrently if not exists"
                 + " plugin_devicelog_log_createtime_idx"
-                + " on plugin_devicelog_log (createtime)";
+                + " on plugin_devicelog_log ((createtime::numeric))";
         assertTrue("changeSet " + PURGE_CHANGESET_ID + " SQL must contain \"" + expectedDropSql
                 + "\" but was: " + sql,
                 sql.contains(expectedDropSql));

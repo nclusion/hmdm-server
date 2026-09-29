@@ -141,14 +141,16 @@
             so a bare createTime predicate cannot use it and every purge
             seq-scans the table: 11-19 s on the prod primary whether it
             deletes 1.5M rows or 599, tripping the AlloyDB slow-query alert
-            on each run. A plain createTime index turns the DELETE into a
-            range scan over the rows past the cutoff. Same CONCURRENTLY /
-            leading-DROP shape as the search index above, for the same
-            reasons.</comment>
+            on each run. EXTRACT(EPOCH ...) returns numeric, so the planner
+            filters on (createTime)::numeric and a plain bigint index would
+            never be used; the index is on that expression. It turns the
+            DELETE into a range scan over the rows past the cutoff. Same
+            CONCURRENTLY / leading-DROP shape as the search index above, for
+            the same reasons.</comment>
         <sql>
             DROP INDEX CONCURRENTLY IF EXISTS plugin_devicelog_log_createtime_idx;
             CREATE INDEX CONCURRENTLY IF NOT EXISTS plugin_devicelog_log_createtime_idx
-            ON plugin_devicelog_log (createTime);
+            ON plugin_devicelog_log ((createTime::numeric));
         </sql>
         <rollback>
             DROP INDEX IF EXISTS plugin_devicelog_log_createtime_idx;
