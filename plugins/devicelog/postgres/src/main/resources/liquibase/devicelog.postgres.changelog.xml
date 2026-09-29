@@ -133,4 +133,26 @@
         </rollback>
     </changeSet>
 
+    <changeSet id="plugin-devicelog-28.09.2026-12:00" author="nclusion" context="common" runInTransaction="false">
+        <comment>Index the device-log retention purge. purgeLogRecords runs
+            DELETE FROM plugin_devicelog_log WHERE createTime &lt; cutoff once
+            a day (and again one hour after every JVM restart). The only
+            secondary index, (deviceId, createTime DESC), leads on deviceId,
+            so a bare createTime predicate cannot use it and every purge
+            seq-scans the table: 11-19 s on the prod primary whether it
+            deletes 1.5M rows or 599, tripping the AlloyDB slow-query alert
+            on each run. A plain createTime index turns the DELETE into a
+            range scan over the rows past the cutoff. Same CONCURRENTLY /
+            leading-DROP shape as the search index above, for the same
+            reasons.</comment>
+        <sql>
+            DROP INDEX CONCURRENTLY IF EXISTS plugin_devicelog_log_createtime_idx;
+            CREATE INDEX CONCURRENTLY IF NOT EXISTS plugin_devicelog_log_createtime_idx
+            ON plugin_devicelog_log (createTime);
+        </sql>
+        <rollback>
+            DROP INDEX IF EXISTS plugin_devicelog_log_createtime_idx;
+        </rollback>
+    </changeSet>
+
 </databaseChangeLog>
