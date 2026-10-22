@@ -38,14 +38,22 @@ env:
 
 jobs:
   publish:
-    # Only nclusion-main publishes. workflow_dispatch takes any ref, and nothing
-    # upstream narrows it: the Workload Identity provider admits any nclusion
-    # repository and the service-account binding names this repository without a
-    # ref condition. So without this guard a dispatch on any branch could put
-    # war:<sha> in the registry that production pins from, permanently, with
-    # nothing in the tag to say the commit was never merged. A dispatch on
-    # another ref skips this job rather than publishing. If branch builds are
-    # ever wanted, they belong under a separate image name.
+    # Catches a dispatch aimed at the wrong ref. It is not a security boundary.
+    #
+    # workflow_dispatch takes any ref, and nothing upstream narrows it: the
+    # Workload Identity provider admits any nclusion repository, and the
+    # service-account binding names this repository without a ref condition. So
+    # without this line a dispatch on any branch would put war:<sha> in the
+    # registry production pins from, permanently, with nothing in the tag to say
+    # the commit was never merged.
+    #
+    # It stops only a mistake, because a run uses the copy of this file on the
+    # ref it builds: a branch that deletes this line, or adds itself to
+    # on.push.branches, still reaches the auth step below. Making the branch a
+    # real boundary means narrowing the binding on github-workflows@nclusion-api
+    # to a ref-scoped subject, which lives in the devops repo, not here.
+    #
+    # If branch builds are ever wanted, they belong under a separate image name.
     if: github.ref == 'refs/heads/nclusion-main'
     runs-on: ubuntu-latest
     steps:
