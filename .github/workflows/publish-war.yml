@@ -1,0 +1,185 @@
+# Publishes the fork WAR as a carrier image, keyed on the commit SHA.
+#
+# The image contains only /launcher.war and is never run. hmdm-docker pins a
+# SHA tag from this repository and copies the WAR out of it at image build time.
+# There is no version number and no floating tag: the SHA is the version.
+#
+# The target repository has immutable tags, so a SHA that has already been
+# published cannot be overwritten. That is not an error here: the same commit
+# always means the same artifact, so an already-published SHA short-circuits
+# the whole job and succeeds. Only a *failed* publish leaves nothing behind,
+# and that case re-runs normally.
+#
+# That short-circuit only holds if one run at a time handles a given SHA, so
+# the concurrency group below is keyed on the SHA. Without it two runs for the
+# same commit could both find no tag, both build, and the second push would be
+# rejected — the Maven build is not reproducible (no pom sets
+# project.build.outputTimestamp), so the two images would not even be the same
+# bytes. Queued instead, the second run finds the tag and exits green.
+
+name: 'Publish WAR'
+
+on:
+  push:
+    branches:
+      - nclusion-main
+  workflow_dispatch:
+
+permissions:
+  contents: 'read'
+  id-token: 'write'
+
+concurrency:
+  group: 'publish-war-${{ github.sha }}'
+  cancel-in-progress: false
+
+env:
+  IMAGE: us-docker.pkg.dev/nclusion-api/hmdm-server/war:${{ github.sha }}
+
+jobs:
+  publish:
+    # Catches a dispatch aimed at the wrong ref. It is not a security boundary.
+    #
+    # workflow_dispatch takes any ref, and nothing upstream narrows it: the
+    # Workload Identity provider admits any nclusion repository, and the
+    # service-account binding names this repository without a ref condition. So
+    # without this line a dispatch on any branch would put war:<sha> in the
+    # registry production pins from, permanently, with nothing in the tag to say
+    # the commit was never merged.
+    #
+    # It stops only a mistake, because a run uses the copy of this file on the
+    # ref it builds: a branch that deletes this line, or adds itself to
+    # on.push.branches, still reaches the auth step below. Making the branch a
+    # real boundary means narrowing the binding on github-workflows@nclusion-api
+    # to a ref-scoped subject, which lives in the devops repo, not here.
+    #
+    # If branch builds are ever wanted, they belong under a separate image name.
+    if: github.ref == 'refs/heads/nclusion-main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: 'access_token'
+          workload_identity_provider: projects/734938197041/locations/global/workloadIdentityPools/github/providers/github-workflows
+          service_account: github-workflows@nclusion-api.iam.gserviceaccount.com
+
+      - name: Docker Auth
+        uses: 'docker/login-action@v3'
+        with:
+          username: 'oauth2accesstoken'
+          password: '${{ steps.auth.outputs.access_token }}'
+          registry: 'us-docker.pkg.dev'
+
+      # Checked before the build rather than after, so a re-run of an
+      # already-published commit costs seconds instead of a full Maven build.
+      - name: Check whether this commit is already published
+        id: published
+        run: |
+          if docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
+            echo 'already=true' >> "$GITHUB_OUTPUT"
+            echo "::notice::$IMAGE is already published; nothing to do."
+          else
+            echo 'already=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up JDK 17
+        if: steps.published.outputs.already == 'false'
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'maven'
+
+      # server/build.properties is gitignored and the repo ships an example of
+      # it. The build fails in the validate phase without it. Its values filter
+      # server/conf/context.xml into server/target/, which is not packaged into
+      # the WAR — verified by extracting launcher.war and finding none of them —
+      # and hmdm-docker writes its own context from its own template anyway. So
+      # the example values never reach a running server.
+      - name: Provide the build-time property file
+        if: steps.published.outputs.already == 'false'
+        run: cp server/build.properties.example server/build.properties
+
+      # The test suite runs, and a failure blocks the publish. Most of these
+      # tests were written by this fork to cover this fork's own commits — the
+      # SSRF hardening, the Liquibase 4.8.0 bump, and the index changes — and
+      # nclusion-main has carried no workflow at all until now, so nothing has
+      # ever executed them on a push. Skipping them here would put the first
+      # fork build in front of production with its own regression tests never
+      # having run once. No pom sets a surefire skip, so the default bindings
+      # run all 11 test classes.
+      - name: Build the WAR
+        if: steps.published.outputs.already == 'false'
+        run: mvn -B -ntp clean install
+
+      - name: Stage the WAR
+        if: steps.published.outputs.already == 'false'
+        run: |
+          test -s server/target/launcher.war
+          mkdir -p build/war
+          cp server/target/launcher.war build/war/launcher.war
+
+      # The build needs server/build.properties to exist, and the only copy in
+      # the repository is the example, whose values are placeholders. They are
+      # meant to filter server/conf/context.xml into server/target/, which is
+      # not packaged — but "not packaged" is a property of the current poms,
+      # not a guarantee, and a future change to the filtering could quietly
+      # start carrying them into the artifact. This fails the publish if any of
+      # them is inside the WAR or inside a jar within it.
+      #
+      # It deliberately scans third-party jars too. That is the stricter
+      # reading: today none of the 113 nested jars contains any of these
+      # strings, so there is nothing to tune out, and a dependency bump that
+      # introduces one should stop and be looked at rather than be assumed
+      # harmless. The error names the file, so triage is immediate.
+      - name: Check the WAR for example property values
+        if: steps.published.outputs.already == 'false'
+        run: |
+          NEEDLES=(
+            'localhost:5432'
+            'D:/home/launcher'
+            'changeme-C3z9vi54'
+            'smtp.mailgun.org'
+            'skcbh252235as'
+          )
+          scan_dir="$(mktemp -d)"
+          trap 'rm -rf "$scan_dir"' EXIT
+          unzip -q build/war/launcher.war -d "$scan_dir/war"
+          n=0
+          while IFS= read -r -d '' jar; do
+            n=$((n + 1))
+            mkdir -p "$scan_dir/nested/$n"
+            unzip -qo "$jar" -d "$scan_dir/nested/$n" 2>/dev/null || true
+          done < <(find "$scan_dir/war" -name '*.jar' -print0)
+          echo "Scanned the WAR and $n nested jars."
+          found=0
+          for needle in "${NEEDLES[@]}"; do
+            if hits="$(grep -rlF -- "$needle" "$scan_dir" 2>/dev/null)"; then
+              found=1
+              echo "::error::build.properties.example value '$needle' reached the packaged WAR:"
+              printf '%s\n' "$hits" \
+                | sed "s|$scan_dir/war|  (war) |; s|$scan_dir/nested/[0-9]*|  (nested jar) |"
+            fi
+          done
+          if [ "$found" -ne 0 ]; then
+            echo 'Example build-time properties must not reach the packaged artifact.'
+            exit 1
+          fi
+          echo 'OK: no build.properties.example values found.'
+
+      # context is the staged WAR alone, so the build context is ~45 MB rather
+      # than the whole repository. file: is resolved against the workspace root.
+      - name: Build and push the carrier image
+        if: steps.published.outputs.already == 'false'
+        uses: docker/build-push-action@v3
+        with:
+          context: build/war
+          file: war.Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE }}
