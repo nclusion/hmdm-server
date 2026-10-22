@@ -105,9 +105,17 @@ jobs:
         if: steps.published.outputs.already == 'false'
         run: cp server/build.properties.example server/build.properties
 
+      # The test suite runs, and a failure blocks the publish. Most of these
+      # tests were written by this fork to cover this fork's own commits — the
+      # SSRF hardening, the Liquibase 4.8.0 bump, and the index changes — and
+      # nclusion-main has carried no workflow at all until now, so nothing has
+      # ever executed them on a push. Skipping them here would put the first
+      # fork build in front of production with its own regression tests never
+      # having run once. No pom sets a surefire skip, so the default bindings
+      # run all 11 test classes.
       - name: Build the WAR
         if: steps.published.outputs.already == 'false'
-        run: mvn -B -ntp clean install -DskipTests
+        run: mvn -B -ntp clean install
 
       - name: Stage the WAR
         if: steps.published.outputs.already == 'false'
@@ -115,6 +123,54 @@ jobs:
           test -s server/target/launcher.war
           mkdir -p build/war
           cp server/target/launcher.war build/war/launcher.war
+
+      # The build needs server/build.properties to exist, and the only copy in
+      # the repository is the example, whose values are placeholders. They are
+      # meant to filter server/conf/context.xml into server/target/, which is
+      # not packaged — but "not packaged" is a property of the current poms,
+      # not a guarantee, and a future change to the filtering could quietly
+      # start carrying them into the artifact. This fails the publish if any of
+      # them is inside the WAR or inside a jar within it.
+      #
+      # It deliberately scans third-party jars too. That is the stricter
+      # reading: today none of the 113 nested jars contains any of these
+      # strings, so there is nothing to tune out, and a dependency bump that
+      # introduces one should stop and be looked at rather than be assumed
+      # harmless. The error names the file, so triage is immediate.
+      - name: Check the WAR for example property values
+        if: steps.published.outputs.already == 'false'
+        run: |
+          NEEDLES=(
+            'localhost:5432'
+            'D:/home/launcher'
+            'changeme-C3z9vi54'
+            'smtp.mailgun.org'
+            'skcbh252235as'
+          )
+          scan_dir="$(mktemp -d)"
+          trap 'rm -rf "$scan_dir"' EXIT
+          unzip -q build/war/launcher.war -d "$scan_dir/war"
+          n=0
+          while IFS= read -r -d '' jar; do
+            n=$((n + 1))
+            mkdir -p "$scan_dir/nested/$n"
+            unzip -qo "$jar" -d "$scan_dir/nested/$n" 2>/dev/null || true
+          done < <(find "$scan_dir/war" -name '*.jar' -print0)
+          echo "Scanned the WAR and $n nested jars."
+          found=0
+          for needle in "${NEEDLES[@]}"; do
+            if hits="$(grep -rlF -- "$needle" "$scan_dir" 2>/dev/null)"; then
+              found=1
+              echo "::error::build.properties.example value '$needle' reached the packaged WAR:"
+              printf '%s\n' "$hits" \
+                | sed "s|$scan_dir/war|  (war) |; s|$scan_dir/nested/[0-9]*|  (nested jar) |"
+            fi
+          done
+          if [ "$found" -ne 0 ]; then
+            echo 'Example build-time properties must not reach the packaged artifact.'
+            exit 1
+          fi
+          echo 'OK: no build.properties.example values found.'
 
       # context is the staged WAR alone, so the build context is ~45 MB rather
       # than the whole repository. file: is resolved against the workspace root.
