@@ -9,6 +9,13 @@
 # always means the same artifact, so an already-published SHA short-circuits
 # the whole job and succeeds. Only a *failed* publish leaves nothing behind,
 # and that case re-runs normally.
+#
+# That short-circuit only holds if one run at a time handles a given SHA, so
+# the concurrency group below is keyed on the SHA. Without it two runs for the
+# same commit could both find no tag, both build, and the second push would be
+# rejected — the Maven build is not reproducible (no pom sets
+# project.build.outputTimestamp), so the two images would not even be the same
+# bytes. Queued instead, the second run finds the tag and exits green.
 
 name: 'Publish WAR'
 
@@ -22,11 +29,24 @@ permissions:
   contents: 'read'
   id-token: 'write'
 
+concurrency:
+  group: 'publish-war-${{ github.sha }}'
+  cancel-in-progress: false
+
 env:
   IMAGE: us-docker.pkg.dev/nclusion-api/hmdm-server/war:${{ github.sha }}
 
 jobs:
   publish:
+    # Only nclusion-main publishes. workflow_dispatch takes any ref, and nothing
+    # upstream narrows it: the Workload Identity provider admits any nclusion
+    # repository and the service-account binding names this repository without a
+    # ref condition. So without this guard a dispatch on any branch could put
+    # war:<sha> in the registry that production pins from, permanently, with
+    # nothing in the tag to say the commit was never merged. A dispatch on
+    # another ref skips this job rather than publishing. If branch builds are
+    # ever wanted, they belong under a separate image name.
+    if: github.ref == 'refs/heads/nclusion-main'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
