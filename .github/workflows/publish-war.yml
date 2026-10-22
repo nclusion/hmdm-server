@@ -1,0 +1,101 @@
+# Publishes the fork WAR as a carrier image, keyed on the commit SHA.
+#
+# The image contains only /launcher.war and is never run. hmdm-docker pins a
+# SHA tag from this repository and copies the WAR out of it at image build time.
+# There is no version number and no floating tag: the SHA is the version.
+#
+# The target repository has immutable tags, so a SHA that has already been
+# published cannot be overwritten. That is not an error here: the same commit
+# always means the same artifact, so an already-published SHA short-circuits
+# the whole job and succeeds. Only a *failed* publish leaves nothing behind,
+# and that case re-runs normally.
+
+name: 'Publish WAR'
+
+on:
+  push:
+    branches:
+      - nclusion-main
+  workflow_dispatch:
+
+permissions:
+  contents: 'read'
+  id-token: 'write'
+
+env:
+  IMAGE: us-docker.pkg.dev/nclusion-api/hmdm-server/war:${{ github.sha }}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: 'access_token'
+          workload_identity_provider: projects/734938197041/locations/global/workloadIdentityPools/github/providers/github-workflows
+          service_account: github-workflows@nclusion-api.iam.gserviceaccount.com
+
+      - name: Docker Auth
+        uses: 'docker/login-action@v3'
+        with:
+          username: 'oauth2accesstoken'
+          password: '${{ steps.auth.outputs.access_token }}'
+          registry: 'us-docker.pkg.dev'
+
+      # Checked before the build rather than after, so a re-run of an
+      # already-published commit costs seconds instead of a full Maven build.
+      - name: Check whether this commit is already published
+        id: published
+        run: |
+          if docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
+            echo 'already=true' >> "$GITHUB_OUTPUT"
+            echo "::notice::$IMAGE is already published; nothing to do."
+          else
+            echo 'already=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up JDK 17
+        if: steps.published.outputs.already == 'false'
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'maven'
+
+      # server/build.properties is gitignored and the repo ships an example of
+      # it. The build fails in the validate phase without it. Its values filter
+      # server/conf/context.xml into server/target/, which is not packaged into
+      # the WAR — verified by extracting launcher.war and finding none of them —
+      # and hmdm-docker writes its own context from its own template anyway. So
+      # the example values never reach a running server.
+      - name: Provide the build-time property file
+        if: steps.published.outputs.already == 'false'
+        run: cp server/build.properties.example server/build.properties
+
+      - name: Build the WAR
+        if: steps.published.outputs.already == 'false'
+        run: mvn -B -ntp clean install -DskipTests
+
+      - name: Stage the WAR
+        if: steps.published.outputs.already == 'false'
+        run: |
+          test -s server/target/launcher.war
+          mkdir -p build/war
+          cp server/target/launcher.war build/war/launcher.war
+
+      # context is the staged WAR alone, so the build context is ~45 MB rather
+      # than the whole repository. file: is resolved against the workspace root.
+      - name: Build and push the carrier image
+        if: steps.published.outputs.already == 'false'
+        uses: docker/build-push-action@v3
+        with:
+          context: build/war
+          file: war.Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE }}
