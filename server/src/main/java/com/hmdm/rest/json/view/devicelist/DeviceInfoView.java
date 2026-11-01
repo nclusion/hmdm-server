@@ -130,6 +130,16 @@ public class DeviceInfoView implements Serializable {
         return deviceInfo.getDefaultLauncher();
     }
 
+    @ApiModelProperty("A build variant of the launcher that submitted this info (e.g. opensource)")
+    public String getLauncherType() {
+        return deviceInfo.getLauncherType();
+    }
+
+    @ApiModelProperty("A package ID of the current default launcher (home app) on the device")
+    public String getLauncherPackage() {
+        return deviceInfo.getLauncherPackage();
+    }
+
     @ApiModelProperty("A list of configuration files installed on device")
     public List<DeviceConfigurationFile> getFiles() {
         return files;

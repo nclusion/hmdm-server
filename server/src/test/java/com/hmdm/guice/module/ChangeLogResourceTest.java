@@ -21,28 +21,17 @@
 
 package com.hmdm.guice.module;
 
-import com.hmdm.notification.guice.module.NotificationLiquibaseModule;
-import com.hmdm.plugin.guice.module.PluginLiquibaseModule;
-import com.hmdm.plugins.audit.guice.module.AuditLiquibaseModule;
-import com.hmdm.plugins.deviceinfo.guice.module.DeviceInfoLiquibaseModule;
-import com.hmdm.plugins.devicelog.guice.module.DeviceLogLiquibaseModule;
-import com.hmdm.plugins.devicelog.persistence.postgres.guice.module.DeviceLogPostgresLiquibaseModule;
-import com.hmdm.plugins.messaging.guice.module.MessagingLiquibaseModule;
-import com.hmdm.plugins.push.guice.module.PushLiquibaseModule;
-import com.hmdm.plugins.xtra.guice.module.XtraLiquibaseModule;
-import liquibase.changelog.ChangeLogParameters;
 import liquibase.changelog.ChangeSet;
 import liquibase.changelog.DatabaseChangeLog;
-import liquibase.parser.ChangeLogParser;
-import liquibase.parser.ChangeLogParserFactory;
 import liquibase.resource.ClassLoaderResourceAccessor;
 import liquibase.resource.InputStreamList;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -51,7 +40,8 @@ import static org.junit.Assert.assertFalse;
  * <p>Tests every change log that the deployed application applies at start-up.</p>
  *
  * <p>The server module depends on all modules that subclass {@link AbstractLiquibaseModule}, so this test sees the
- * same aggregate classpath as the deployed WAR. Two properties are checked for each module:</p>
+ * same aggregate classpath as the deployed WAR. Two properties are checked for each change log in
+ * {@link DeployedChangeLog#all()}:</p>
  *
  * <ul>
  *     <li>the resource path is classpath-relative and resolves to exactly one resource, which a per-module test
@@ -65,54 +55,31 @@ import static org.junit.Assert.assertFalse;
 public class ChangeLogResourceTest {
 
     /**
-     * <p>Gets the module and the logical file path to check, one pair for each deployed change log.</p>
+     * <p>Gets the change logs to check.</p>
      *
-     * <p>Four modules share the <code>db.changelog.xml</code> logical file path, so their change sets share one
-     * <code>FILENAME</code> identity space. {@link ChangeSetIdentityTest} reads this list and proves that no two
-     * change sets in that space collide.</p>
-     *
-     * @return the test data, as module name, module and expected logical file path triples.
+     * @return one single-element parameter array for each deployed change log.
      */
     @Parameterized.Parameters(name = "{0}")
     public static Collection<Object[]> changeLogs() {
-        return Arrays.asList(new Object[][]{
-                {"server", new LiquibaseModule(null), "db.changelog.xml"},
-                {"plugin platform", new PluginLiquibaseModule(null), "db.changelog.xml"},
-                {"devicelog core", new DeviceLogLiquibaseModule(null), "db.changelog.xml"},
-                {"devicelog postgres", new DeviceLogPostgresLiquibaseModule(null), "db.changelog.xml"},
-                {"notification", new NotificationLiquibaseModule(null), "notification.changelog.xml"},
-                {"audit", new AuditLiquibaseModule(null), "audit.changelog.xml"},
-                {"deviceinfo", new DeviceInfoLiquibaseModule(null), "deviceinfo.changelog.xml"},
-                {"messaging", new MessagingLiquibaseModule(null), "messaging.changelog.xml"},
-                {"push", new PushLiquibaseModule(null), "push.changelog.xml"},
-                {"xtra", new XtraLiquibaseModule(null), "xtra.changelog.xml"},
-        });
+        List<Object[]> parameters = new ArrayList<>();
+        for (DeployedChangeLog changeLog : DeployedChangeLog.all()) {
+            parameters.add(new Object[]{changeLog});
+        }
+        return parameters;
     }
 
     /**
-     * <p>The name of the module under test, used to label the test run.</p>
+     * <p>The change log under test.</p>
      */
     @Parameterized.Parameter
-    public String moduleName;
-
-    /**
-     * <p>The module under test.</p>
-     */
-    @Parameterized.Parameter(1)
-    public AbstractLiquibaseModule module;
-
-    /**
-     * <p>The logical file path that the change log of the module under test must declare.</p>
-     */
-    @Parameterized.Parameter(2)
-    public String expectedLogicalFilePath;
+    public DeployedChangeLog changeLog;
 
     /**
      * <p>Proves that the change log path of the module resolves to exactly one classpath resource.</p>
      */
     @Test
     public void testChangeLogPathResolvesToOneResource() throws Exception {
-        String changeLogPath = this.module.getChangeLogResourcePath();
+        String changeLogPath = this.changeLog.resourcePath();
 
         try (ClassLoaderResourceAccessor accessor = new ClassLoaderResourceAccessor();
              InputStreamList streams = accessor.openStreams(null, changeLogPath)) {
@@ -126,18 +93,14 @@ public class ChangeLogResourceTest {
      */
     @Test
     public void testChangeSetsRecordExpectedLogicalFilePath() throws Exception {
-        String changeLogPath = this.module.getChangeLogResourcePath();
+        DatabaseChangeLog parsed = this.changeLog.parse();
 
-        try (ClassLoaderResourceAccessor accessor = new ClassLoaderResourceAccessor()) {
-            ChangeLogParser parser = ChangeLogParserFactory.getInstance().getParser(changeLogPath, accessor);
-            DatabaseChangeLog changeLog = parser.parse(changeLogPath, new ChangeLogParameters(), accessor);
-
-            assertFalse("Change log must contain change sets: " + changeLogPath, changeLog.getChangeSets().isEmpty());
-            for (ChangeSet changeSet : changeLog.getChangeSets()) {
-                assertEquals("Change set " + changeSet.getId() + " must record the logical file path. A different"
-                                + " value makes Liquibase apply this change set again to an existing database.",
-                        this.expectedLogicalFilePath, changeSet.getFilePath());
-            }
+        assertFalse("Change log must contain change sets: " + this.changeLog.resourcePath(),
+                parsed.getChangeSets().isEmpty());
+        for (ChangeSet changeSet : parsed.getChangeSets()) {
+            assertEquals("Change set " + changeSet.getId() + " must record the logical file path. A different"
+                            + " value makes Liquibase apply this change set again to an existing database.",
+                    this.changeLog.logicalFilePath(), changeSet.getFilePath());
         }
     }
 }

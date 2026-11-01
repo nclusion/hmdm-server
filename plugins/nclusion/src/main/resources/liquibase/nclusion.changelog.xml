@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!--
+  ~
+  ~ Headwind MDM: Open Source Android MDM Software
+  ~ https://h-mdm.com
+  ~
+  ~ Copyright (C) 2019 Headwind Solutions LLC (http://h-sms.com)
+  ~
+  ~ Licensed under the Apache License, Version 2.0 (the "License");
+  ~ you may not use this file except in compliance with the License.
+  ~ You may obtain a copy of the License at
+  ~
+  ~       http://www.apache.org/licenses/LICENSE-2.0
+  ~
+  ~ Unless required by applicable law or agreed to in writing, software
+  ~ distributed under the License is distributed on an "AS IS" BASIS,
+  ~ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  ~ See the License for the specific language governing permissions and
+  ~ limitations under the License.
+  ~
+  -->
+
+<!--
+  The Nclusion fork's change sets for tables that the server change log creates.
+
+  logicalFilePath is "db.changelog.xml", the value the server change log
+  declares, so these change sets share the server's identity space in
+  DATABASECHANGELOG. ChangeSetIdentityTest proves that no two change sets in
+  that space collide. Each change set keeps its id, author and contents, so a
+  database that has applied it does not apply it again and its checksum
+  still validates.
+-->
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.0.xsd"
+        logicalFilePath="db.changelog.xml">
+
+    <changeSet id="09.09.26-12:00" author="nclusion" context="common" runInTransaction="false">
+        <comment>Index devices.oldNumber (AlloyDB index advisor).
+            CONCURRENTLY (hence runInTransaction=false) so the build never blocks
+            writes on a live database. The leading DROP also runs on a first
+            deploy, where it replaces any same-named index with this definition;
+            it exists for the retry after an interrupted CONCURRENTLY build,
+            which leaves an INVALID index that IF NOT EXISTS alone would
+            silently keep. A succeeded changeset never re-executes.</comment>
+        <sql>
+            DROP INDEX CONCURRENTLY IF EXISTS devices_oldnumber_idx;
+            CREATE INDEX CONCURRENTLY IF NOT EXISTS devices_oldnumber_idx
+            ON devices (oldNumber);
+        </sql>
+        <rollback>
+            DROP INDEX IF EXISTS devices_oldnumber_idx;
+        </rollback>
+    </changeSet>
+
+    <changeSet id="09.09.26-12:01" author="nclusion" context="common" runInTransaction="false">
+        <comment>Index configurationApplications.applicationVersionId (AlloyDB
+            index advisor, 3 query shapes). CONCURRENTLY build behind a leading
+            DROP; see changeset 09.09.26-12:00 for the rationale.</comment>
+        <sql>
+            DROP INDEX CONCURRENTLY IF EXISTS configurationapplications_applicationversionid_idx;
+            CREATE INDEX CONCURRENTLY IF NOT EXISTS configurationapplications_applicationversionid_idx
+            ON configurationApplications (applicationVersionId);
+        </sql>
+        <rollback>
+            DROP INDEX IF EXISTS configurationapplications_applicationversionid_idx;
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

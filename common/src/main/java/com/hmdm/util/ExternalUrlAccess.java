@@ -102,7 +102,7 @@ public final class ExternalUrlAccess {
      * <p>Returns {@code true} when {@code externalUrl} is http(s), its host resolves, and no
      * resolved address is blocked (see {@link #isBlockedAddress(InetAddress)}).</p>
      */
-    public static boolean isSafeExternalUrl(String externalUrl) {
+    static boolean isSafeExternalUrl(String externalUrl) {
         if (externalUrl == null || externalUrl.isEmpty()) {
             return false;
         }
@@ -146,7 +146,7 @@ public final class ExternalUrlAccess {
      * <p>Creates an unconnected HTTP(S) connection with redirect following disabled and the
      * standard connect/read timeouts, so one unresponsive host cannot stall the calling thread.</p>
      */
-    public static HttpURLConnection createHttpConnection(URL url) throws IOException {
+    static HttpURLConnection createHttpConnection(URL url) throws IOException {
         URLConnection connection = url.openConnection();
         if (!(connection instanceof HttpURLConnection)) {
             throw new IOException("Expected HTTP(S) connection for " + url);

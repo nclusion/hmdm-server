@@ -99,6 +99,8 @@
         </dependency>
 
         <dependency><groupId>com.hmdm.plugin</groupId><artifactId>push</artifactId><version>0.1.0</version><scope>runtime</scope></dependency>
+        <!-- The formatting of this line must be kept as is - a single line -->
+        <dependency><groupId>com.hmdm.plugin</groupId><artifactId>nclusion</artifactId><version>0.1.0</version><scope>runtime</scope></dependency>
     </dependencies>
 
     <build>
