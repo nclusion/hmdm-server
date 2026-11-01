@@ -112,18 +112,10 @@ public class ConfigurationDAO extends AbstractLinkedDAO<Configuration, Applicati
                         .filter(file -> file.getExternalUrl() != null)
                         .forEach(file -> {
                             try {
-                                if (ExternalUrlAccess.isSafeExternalUrl(file.getExternalUrl())) {
-                                    final String checksum = CryptoUtil.calculateChecksum(
-                                            ExternalUrlAccess.openValidatedStream(file.getExternalUrl()));
-                                    file.setChecksum(checksum);
-                                } else {
-                                    log.warn("Rejected unsafe external URL for configuration file checksum calculation: {}",
-                                            ExternalUrlAccess.sanitizeForLog(file.getExternalUrl()));
-                                    file.setChecksum("");
-                                }
+                                final String checksum = CryptoUtil.calculateChecksum(ExternalUrlAccess.openValidatedStream(file.getExternalUrl()));
+                                file.setChecksum(checksum);
                             } catch (NoSuchAlgorithmException | IOException e) {
-                                log.error("Failed to calculate checksum for content URL: {}",
-                                        ExternalUrlAccess.sanitizeForLog(file.getExternalUrl()), e);
+                                log.error("Failed to calculate checksum for content URL: {}", ExternalUrlAccess.sanitizeForLog(file.getExternalUrl()), e);
                                 file.setChecksum("");
                             }
                         });
@@ -176,18 +168,12 @@ public class ConfigurationDAO extends AbstractLinkedDAO<Configuration, Applicati
                                         ConfigurationFile legacyFile = legacyFilesMap.get(file.getId());
                                         if (legacyFile != null && file.getExternalUrl().equals(legacyFile.getExternalUrl())) {
                                             file.setChecksum(legacyFile.getChecksum());
-                                        } else if (ExternalUrlAccess.isSafeExternalUrl(file.getExternalUrl())) {
-                                            final String checksum = CryptoUtil.calculateChecksum(
-                                                    ExternalUrlAccess.openValidatedStream(file.getExternalUrl()));
-                                            file.setChecksum(checksum);
                                         } else {
-                                            log.warn("Rejected unsafe external URL for configuration file checksum calculation: {}",
-                                                    ExternalUrlAccess.sanitizeForLog(file.getExternalUrl()));
-                                            file.setChecksum("");
+                                            final String checksum = CryptoUtil.calculateChecksum(ExternalUrlAccess.openValidatedStream(file.getExternalUrl()));
+                                            file.setChecksum(checksum);
                                         }
                                     } catch (NoSuchAlgorithmException | IOException e) {
-                                        log.error("Failed to calculate checksum for content URL: {}",
-                                                ExternalUrlAccess.sanitizeForLog(file.getExternalUrl()), e);
+                                        log.error("Failed to calculate checksum for content URL: {}", ExternalUrlAccess.sanitizeForLog(file.getExternalUrl()), e);
                                         file.setChecksum("");
                                     }
                                 });
