@@ -112,7 +112,7 @@ jobs:
       # ever executed them on a push. Skipping them here would put the first
       # fork build in front of production with its own regression tests never
       # having run once. No pom sets a surefire skip, so the default bindings
-      # run all 11 test classes.
+      # run every test class.
       - name: Build the WAR
         if: steps.published.outputs.already == 'false'
         run: mvn -B -ntp clean install

@@ -21,16 +21,10 @@
 
 package com.hmdm.guice.module;
 
-import liquibase.changelog.ChangeLogParameters;
 import liquibase.changelog.ChangeSet;
-import liquibase.changelog.DatabaseChangeLog;
-import liquibase.parser.ChangeLogParser;
-import liquibase.parser.ChangeLogParserFactory;
-import liquibase.resource.ClassLoaderResourceAccessor;
 import org.junit.Test;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -43,12 +37,13 @@ import static org.junit.Assert.assertTrue;
  * <p>Tests that no two change sets of the deployed application claim the same identity.</p>
  *
  * <p>Liquibase identifies an applied change set by the triple of author, identifier and logical file path, which it
- * writes to <code>DATABASECHANGELOG</code>. Four modules declare the same <code>db.changelog.xml</code> logical file
- * path, so their change sets share one identity space. Two change sets with the same author and identifier in
+ * writes to <code>DATABASECHANGELOG</code>. Several modules declare the same <code>db.changelog.xml</code> logical
+ * file path, so their change sets share one identity space. Two change sets with the same author and identifier in
  * that space collide: Liquibase applies the first and then skips the second, because the row of the first already
  * marks the second as applied.</p>
  *
- * <p>{@link ChangeLogResourceTest} supplies the modules, so a new module joins this test when it joins that one.</p>
+ * <p>{@link DeployedChangeLog#all()} supplies the change logs, so a new module joins this test when it joins that
+ * list.</p>
  */
 public class ChangeSetIdentityTest {
 
@@ -60,21 +55,13 @@ public class ChangeSetIdentityTest {
         Map<String, Set<String>> identitiesBySpace = new HashMap<>();
         List<String> collisions = new ArrayList<>();
 
-        try (ClassLoaderResourceAccessor accessor = new ClassLoaderResourceAccessor()) {
-            for (Object[] changeLog : ChangeLogResourceTest.changeLogs()) {
-                String moduleName = (String) changeLog[0];
-                String changeLogPath = ((AbstractLiquibaseModule) changeLog[1]).getChangeLogResourcePath();
-
-                ChangeLogParser parser = ChangeLogParserFactory.getInstance().getParser(changeLogPath, accessor);
-                DatabaseChangeLog parsed = parser.parse(changeLogPath, new ChangeLogParameters(), accessor);
-
-                for (ChangeSet changeSet : parsed.getChangeSets()) {
-                    Set<String> identities = identitiesBySpace.computeIfAbsent(
-                            changeSet.getFilePath(), space -> new HashSet<>());
-                    String identity = changeSet.getAuthor() + ":" + changeSet.getId();
-                    if (!identities.add(identity)) {
-                        collisions.add(identity + " in " + changeSet.getFilePath() + ", seen again in " + moduleName);
-                    }
+        for (DeployedChangeLog changeLog : DeployedChangeLog.all()) {
+            for (ChangeSet changeSet : changeLog.parse().getChangeSets()) {
+                Set<String> identities = identitiesBySpace.computeIfAbsent(
+                        changeSet.getFilePath(), space -> new HashSet<>());
+                String identity = changeSet.getAuthor() + ":" + changeSet.getId();
+                if (!identities.add(identity)) {
+                    collisions.add(identity + " in " + changeSet.getFilePath() + ", seen again in " + changeLog);
                 }
             }
         }
