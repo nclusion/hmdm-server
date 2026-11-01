@@ -56,9 +56,9 @@ public class ConcurrentIndexChangeSetTest {
     public static Collection<Object[]> indexChangeSets() {
         return Arrays.asList(new Object[][]{
                 // AlloyDB index advisor recommendations for core server tables.
-                {DeployedChangeLog.SERVER, "09.09.26-12:00", "devices_oldnumber_idx",
+                {DeployedChangeLog.NCLUSION, "09.09.26-12:00", "devices_oldnumber_idx",
                         "create index concurrently if not exists devices_oldnumber_idx on devices (oldnumber)"},
-                {DeployedChangeLog.SERVER, "09.09.26-12:01", "configurationapplications_applicationversionid_idx",
+                {DeployedChangeLog.NCLUSION, "09.09.26-12:01", "configurationapplications_applicationversionid_idx",
                         "create index concurrently if not exists configurationapplications_applicationversionid_idx"
                                 + " on configurationapplications (applicationversionid)"},
                 // The device log search joins on deviceId and orders by createTime DESC.

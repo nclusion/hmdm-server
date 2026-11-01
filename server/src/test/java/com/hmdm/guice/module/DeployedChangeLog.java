@@ -28,6 +28,7 @@ import com.hmdm.plugins.deviceinfo.guice.module.DeviceInfoLiquibaseModule;
 import com.hmdm.plugins.devicelog.guice.module.DeviceLogLiquibaseModule;
 import com.hmdm.plugins.devicelog.persistence.postgres.guice.module.DeviceLogPostgresLiquibaseModule;
 import com.hmdm.plugins.messaging.guice.module.MessagingLiquibaseModule;
+import com.hmdm.plugins.nclusion.guice.module.NclusionLiquibaseModule;
 import com.hmdm.plugins.push.guice.module.PushLiquibaseModule;
 import com.hmdm.plugins.xtra.guice.module.XtraLiquibaseModule;
 import liquibase.changelog.ChangeLogParameters;
@@ -45,7 +46,7 @@ import java.util.List;
  * <p>A change log that the deployed application applies, with the module that applies it and the logical file
  * path that its change sets must record.</p>
  *
- * <p>Four modules share the <code>db.changelog.xml</code> logical file path, so their change sets share one
+ * <p>Five modules share the <code>db.changelog.xml</code> logical file path, so their change sets share one
  * <code>FILENAME</code> identity space in <code>DATABASECHANGELOG</code>. {@link ChangeSetIdentityTest} proves that
  * no two change sets in that space collide.</p>
  *
@@ -54,10 +55,10 @@ import java.util.List;
 public final class DeployedChangeLog {
 
     /**
-     * <p>The change sets of the core server.</p>
+     * <p>The Nclusion fork's change sets for core server tables.</p>
      */
-    public static final DeployedChangeLog SERVER =
-            new DeployedChangeLog("server", new LiquibaseModule(null), "db.changelog.xml");
+    public static final DeployedChangeLog NCLUSION =
+            new DeployedChangeLog("nclusion", new NclusionLiquibaseModule(null), "db.changelog.xml");
 
     /**
      * <p>The change sets of the PostgreSQL device log.</p>
@@ -66,10 +67,11 @@ public final class DeployedChangeLog {
             new DeployedChangeLog("devicelog postgres", new DeviceLogPostgresLiquibaseModule(null), "db.changelog.xml");
 
     private static final List<DeployedChangeLog> ALL = Collections.unmodifiableList(Arrays.asList(
-            SERVER,
+            new DeployedChangeLog("server", new LiquibaseModule(null), "db.changelog.xml"),
             new DeployedChangeLog("plugin platform", new PluginLiquibaseModule(null), "db.changelog.xml"),
             new DeployedChangeLog("devicelog core", new DeviceLogLiquibaseModule(null), "db.changelog.xml"),
             DEVICELOG_POSTGRES,
+            NCLUSION,
             new DeployedChangeLog("notification", new NotificationLiquibaseModule(null), "notification.changelog.xml"),
             new DeployedChangeLog("audit", new AuditLiquibaseModule(null), "audit.changelog.xml"),
             new DeployedChangeLog("deviceinfo", new DeviceInfoLiquibaseModule(null), "deviceinfo.changelog.xml"),
