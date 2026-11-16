@@ -130,19 +130,39 @@ public final class FileUtil {
     }
 
     /**
-     * <p>Removes path separators and parent-directory segments so the prefix cannot escape
-     * the upload temp directory. Other characters are kept so {@link #getNameFromTmpPath(String)}
-     * still returns the name that was stored.</p>
+     * <p>Replaces path separators and NUL so the prefix is one path component.
+     * Other characters, including a {@code ".."} sequence inside a file name, are kept
+     * so {@link #getNameFromTmpPath(String)} returns that name.</p>
      */
     static String sanitizeTempFilePrefix(String fileName) {
         if (fileName == null || fileName.isEmpty()) {
             return "upload";
         }
         return fileName
-                .replace("..", "_")
                 .replace("/", "_")
                 .replace("\\", "_")
                 .replace("\0", "_");
+    }
+
+    /**
+     * <p>True when {@code path} is a direct child of the upload temp directory.
+     * A file name may contain {@code ".."} as text. A {@code ".."} path segment may not.</p>
+     */
+    public static boolean isStagedTempPath(String filesDirectory, String path) {
+        String stagedRoot = uploadTempDirectoryPath(filesDirectory);
+        if (path == null || stagedRoot.isEmpty()) {
+            return false;
+        }
+        String prefix = stagedRoot + File.separator;
+        if (!path.startsWith(prefix)) {
+            return false;
+        }
+        String name = path.substring(prefix.length());
+        return !name.isEmpty()
+                && name.indexOf('/') < 0
+                && name.indexOf('\\') < 0
+                && !".".equals(name)
+                && !"..".equals(name);
     }
 
     private static boolean supportsPosixPermissions(Path path) {

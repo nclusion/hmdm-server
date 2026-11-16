@@ -201,12 +201,8 @@ public class FilesResource {
         if (moveFileRequest.getLocalPath() == null || moveFileRequest.getLocalPath().equals("")) {
             moveFileRequest.setLocalPath("/");
         }
-        String stagedRoot = FileUtil.uploadTempDirectoryPath(this.filesDirectory);
         if (!FileUtil.isSafePath(moveFileRequest.getLocalPath()) ||
-            moveFileRequest.getPath() == null ||
-            !FileUtil.isSafePath(moveFileRequest.getPath()) ||
-            stagedRoot.isEmpty() ||
-            !moveFileRequest.getPath().startsWith(stagedRoot + File.separator)) {
+            !FileUtil.isStagedTempPath(this.filesDirectory, moveFileRequest.getPath())) {
             logger.error("Attempt to move a file with unsafe path! local path: " + moveFileRequest.getLocalPath() +
                     " path: " + moveFileRequest.getPath());
             return Response.PERMISSION_DENIED();

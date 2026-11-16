@@ -63,6 +63,18 @@ public class FileUtilTempFileTests {
         File tempFile = FileUtil.createTempFile(filesDirectory.getAbsolutePath(), "a/b.pdf");
 
         Assert.assertEquals("a_b.pdf", FileUtil.getNameFromTmpPath(tempFile.getAbsolutePath()));
+        Assert.assertFalse(FileUtil.isStagedTempPath(
+                filesDirectory.getAbsolutePath(),
+                tempFile.getParentFile().getAbsolutePath() + "/../../etc/passwd"));
+    }
+
+    @Test
+    public void doubleDotInFileNameRoundTrips() throws Exception {
+        File filesDirectory = folder.newFolder("files");
+        File tempFile = FileUtil.createTempFile(filesDirectory.getAbsolutePath(), "report..final.pdf");
+
+        Assert.assertEquals("report..final.pdf", FileUtil.getNameFromTmpPath(tempFile.getAbsolutePath()));
+        Assert.assertTrue(FileUtil.isStagedTempPath(filesDirectory.getAbsolutePath(), tempFile.getAbsolutePath()));
         Assert.assertEquals(
                 FileUtil.uploadTempDirectoryPath(filesDirectory.getAbsolutePath()),
                 tempFile.getParentFile().getAbsolutePath());
