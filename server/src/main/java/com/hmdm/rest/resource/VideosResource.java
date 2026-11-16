@@ -73,13 +73,19 @@ public class VideosResource {
             videoDir.mkdirs();
         }
 
-        File uploadFile = FileUtil.resolveContainedFile(videoDir, fileDetail.getFileName());
+        String uploadedName = fileDetail.getFileName();
+        if (uploadedName == null || uploadedName.isEmpty()) {
+            return Response.ERROR("error.params.missing");
+        }
+        File uploadFile = FileUtil.resolveContainedChild(videoDir, uploadedName);
         if (uploadFile == null) {
             return Response.PERMISSION_DENIED();
         }
-        writeToFile(uploadedInputStream, uploadFile);
+        if (!writeToFile(uploadedInputStream, uploadFile)) {
+            return Response.ERROR("error.file.save");
+        }
         Video video = new Video();
-        video.setPath(String.format("%s/rest/public/videos/%s", this.baseUrl, URLEncoder.encode(fileDetail.getFileName(), "UTF8")));
+        video.setPath(String.format("%s/rest/public/videos/%s", this.baseUrl, URLEncoder.encode(uploadedName, "UTF8")));
         return Response.OK(video);
     }
 
@@ -92,11 +98,11 @@ public class VideosResource {
             videoDir.mkdirs();
         }
 
-        File videoFile = FileUtil.resolveContainedFile(videoDir, URLDecoder.decode(fileName, "UTF8"));
+        File videoFile = FileUtil.resolveContainedChild(videoDir, URLDecoder.decode(fileName, "UTF8"));
         if (videoFile == null) {
             return javax.ws.rs.core.Response.status(403).build();
         }
-        if (!videoFile.exists()) {
+        if (!videoFile.isFile()) {
             return javax.ws.rs.core.Response.status(404).build();
         } else {
             ContentDisposition contentDisposition = ContentDisposition.type("attachment").fileName(videoFile.getName()).creationDate(new Date()).build();

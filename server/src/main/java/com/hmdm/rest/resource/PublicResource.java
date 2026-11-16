@@ -215,7 +215,7 @@ public class PublicResource {
                 File filesBase = new File(this.filesDirectory);
                 File customerBase = FileUtil.resolveContainedFile(filesBase, customer.getFilesDir());
                 File uploadFile = customerBase == null ? null
-                        : FileUtil.resolveContainedFile(customerBase, request.getLocalPath(), request.getFileName());
+                        : FileUtil.resolveContainedChild(customerBase, request.getLocalPath(), request.getFileName());
                 if (uploadFile == null) {
                     logger.error("Attempt to upload a file outside the customer files directory! local path: {} file name: {}",
                             request.getLocalPath(), request.getFileName());
@@ -228,7 +228,10 @@ public class PublicResource {
                 }
 
                 if (parentFile != null && parentFile.exists() && parentFile.isDirectory()) {
-                    writeToFile(uploadedInputStream, uploadFile);
+                    if (!writeToFile(uploadedInputStream, uploadFile)) {
+                        logger.error("Failed to write uploaded file to {}", uploadFile.getAbsolutePath());
+                        return Response.INTERNAL_ERROR();
+                    }
                     fileUploaded = true;
                 } else {
                     logger.error("Can not save the file on server in directory: {}", parentFile);

@@ -107,13 +107,13 @@ public class DownloadFilesServlet extends HttpServlet {
             }
         }
 
-        File file = FileUtil.resolveContainedFile(this.baseDirectory, path);
+        File file = FileUtil.resolveContainedChild(this.baseDirectory, path);
         if (file == null) {
             log.warn("Rejected path outside files directory: {}", path);
             resp.sendError(403);
             return;
         }
-        if (file.exists()) {
+        if (file.isFile()) {
 
             long modifiedSince = req.getDateHeader("If-Modified-Since");
             if (modifiedSince != -1 && modifiedSince > file.lastModified()) {

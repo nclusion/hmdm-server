@@ -196,13 +196,15 @@ public class UpdateResource {
                 conn.setRequestProperty("Authorization", basicAuth);
             }
 
-            File file = FileUtil.resolveContainedFile(new File(filesDirectory), getFileNameFromUrl(app.getUrl()));
+            File file = FileUtil.resolveContainedChild(new File(filesDirectory), getFileNameFromUrl(app.getUrl()));
             if (file == null) {
                 logger.warn("Refusing to write update file outside files directory: {}", getFileNameFromUrl(app.getUrl()));
                 return false;
             }
             inputStream = conn.getInputStream();
-            FileUtil.writeToFile(conn.getInputStream(), file);
+            if (!FileUtil.writeToFile(conn.getInputStream(), file)) {
+                return false;
+            }
 
             createWebManifest(app);
 

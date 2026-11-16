@@ -57,14 +57,15 @@ public final class FileUtil {
 
     /**
      * <p>Writes the stream to a destination that has already been validated as contained under an intended base
-     * directory (via {@link #resolveContainedFile(File, String)} or equivalent).</p>
+     * directory (via {@link #resolveContainedChild(File, String)} or equivalent).</p>
      *
      * @param uploadedInputStream content to write.
-     * @param destinationFile destination file (must already be resolved/validated by the caller).
+     * @param destinationFile destination file (must already be resolved/validated by the caller; must not be a directory).
+     * @return {@code true} if the bytes were written; {@code false} if the destination was rejected or the write failed.
      */
-    public static void writeToFile(InputStream uploadedInputStream, File destinationFile) {
-        if (destinationFile == null) {
-            return;
+    public static boolean writeToFile(InputStream uploadedInputStream, File destinationFile) {
+        if (destinationFile == null || (destinationFile.exists() && destinationFile.isDirectory())) {
+            return false;
         }
         try (FileOutputStream out = new FileOutputStream(destinationFile)) {
             byte[] bytes = new byte[1024];
@@ -75,9 +76,11 @@ public final class FileUtil {
             }
 
             out.flush();
+            return true;
 
         } catch (IOException e) {
             e.printStackTrace();
+            return false;
         }
     }
 
@@ -88,15 +91,14 @@ public final class FileUtil {
      * @param uploadedInputStream content to write.
      * @param baseDirectory intended base directory that must contain the destination.
      * @param uploadedFileLocation absolute or relative destination path.
-     * @return {@code true} if the write was attempted to a contained path; {@code false} if the path was rejected.
+     * @return {@code true} if the write succeeded; {@code false} if the path was rejected or the write failed.
      */
     public static boolean writeToFile(InputStream uploadedInputStream, File baseDirectory, String uploadedFileLocation) {
         File destination = confirmContained(baseDirectory, uploadedFileLocation);
         if (destination == null) {
             return false;
         }
-        writeToFile(uploadedInputStream, destination);
-        return true;
+        return writeToFile(uploadedInputStream, destination);
     }
 
     /**
@@ -141,9 +143,10 @@ public final class FileUtil {
         File file;
         String relativeLocal = normalizeRelativeChild(localPath);
         if (relativeLocal.isEmpty()) {
-            file = resolveContainedFile(customerBase, fileName);
+            file = resolveContainedChild(customerBase, fileName);
         } else {
-            file = resolveContainedFile(customerBase, relativeLocal, fileName);
+            File localDir = resolveContainedFile(customerBase, relativeLocal);
+            file = localDir == null ? null : resolveContainedChild(localDir, fileName);
         }
         if (file == null) {
             return null;
@@ -166,8 +169,11 @@ public final class FileUtil {
             // For example, on Tomcat 9 renaming from /tmp to /var/lib/tomcat9/work will fail due to sandbox restrictions
             try {
                 FileInputStream inputStream = new FileInputStream(localFile);
-                writeToFile(inputStream, file);
+                boolean written = writeToFile(inputStream, file);
                 inputStream.close();
+                if (!written) {
+                    return null;
+                }
                 localFile.delete();
                 return file;
             } catch (Exception e) {
@@ -205,7 +211,7 @@ public final class FileUtil {
         if (customerBase == null) {
             return false;
         }
-        final File fileToDelete = resolveContainedFile(customerBase, path);
+        final File fileToDelete = resolveContainedChild(customerBase, path);
         if (fileToDelete == null) {
             return false;
         }
@@ -236,7 +242,7 @@ public final class FileUtil {
     public static void downloadFile(URL url, String directory, String name) throws IOException {
         BufferedInputStream bis = new BufferedInputStream(url.openStream());
         File base = new File(directory);
-        File file = resolveContainedFile(base, name);
+        File file = resolveContainedChild(base, name);
         if (file == null) {
             bis.close();
             throw new IOException("Refusing to download outside base directory: " + name);
@@ -268,20 +274,23 @@ public final class FileUtil {
         if ("/".equals(normalized) || "./".equals(normalized) || ".".equals(normalized)) {
             return true;
         }
-        if (new File(path).isAbsolute()) {
-            return false;
-        }
-        // Strip a leading "./" used as "customer root"
+        // Strip leading "./" and "/" root-of-base markers before absolute checks so values like
+        // "/subdir/file" (UI-relative) stay accepted while drive-letter/UNC forms are rejected.
         while (normalized.startsWith("./")) {
             normalized = normalized.substring(2);
         }
-        // A single leading slash on an otherwise relative path (e.g. "/subdir/file") is a
-        // root-of-base marker, not a filesystem absolute path (those were rejected above).
-        if (normalized.startsWith("/")) {
+        while (normalized.startsWith("/")) {
             normalized = normalized.substring(1);
         }
         if (normalized.isEmpty()) {
             return true;
+        }
+        if (new File(normalized).isAbsolute()) {
+            return false;
+        }
+        // Reject Windows drive-letter forms even on non-Windows JVMs
+        if (normalized.length() >= 2 && Character.isLetter(normalized.charAt(0)) && normalized.charAt(1) == ':') {
+            return false;
         }
         String[] parts = normalized.split("/");
         for (int i = 0; i < parts.length; i++) {
@@ -292,7 +301,6 @@ public final class FileUtil {
             if ("..".equals(part)) {
                 return false;
             }
-            // Reject Windows drive-style segments
             if (part.indexOf(':') >= 0) {
                 return false;
             }
@@ -302,13 +310,19 @@ public final class FileUtil {
 
     /**
      * <p>Resolves {@code childPath} against {@code baseDir} and returns the canonical file only when the result
-     * stays inside the base directory. Returns {@code null} for absolute child paths, empty names that escape,
-     * traversal ({@code ..}), symlink escapes (where the platform resolves them), or I/O failures.</p>
+     * stays inside the base directory. Returns {@code null} for unsafe children, traversal ({@code ..}),
+     * symlink escapes (where the platform resolves them), or I/O failures.</p>
      *
-     * <p>An empty, {@code null}, or {@code /} child path resolves to the canonical base directory itself.</p>
+     * <p>An empty, {@code null}, or {@code /} child path resolves to the canonical base directory itself
+     * (directory lookup). Prefer {@link #resolveContainedChild(File, String)} when the caller expects a
+     * real file under the base rather than the base directory.</p>
+     *
+     * <p>A leading slash is treated as a root-of-base marker ({@code /subdir} → {@code subdir} under the base),
+     * matching historical {@code new File(base, "/subdir")} behaviour. Values that remain absolute after
+     * that normalization (Windows drive letters / UNC) are rejected.</p>
      *
      * @param baseDir intended containing directory (created if missing).
-     * @param childPath relative child path; must not be absolute.
+     * @param childPath relative child path (leading {@code /} allowed as base-root marker).
      * @return canonical contained {@link File}, or {@code null} if the path is unsafe.
      */
     public static File resolveContainedFile(File baseDir, String childPath) {
@@ -316,17 +330,15 @@ public final class FileUtil {
             return null;
         }
         try {
-            // Reject absolute child paths before stripping a leading slash — otherwise
-            // "/etc/passwd" would be treated as the relative path "etc/passwd".
-            if (childPath != null && !childPath.isEmpty()
-                    && !"/".equals(childPath) && !"\\".equals(childPath)
-                    && new File(childPath).isAbsolute()) {
-                return null;
-            }
             File base = canonicalBase(baseDir);
             String relative = normalizeRelativeChild(childPath);
             if (relative.isEmpty()) {
                 return base;
+            }
+            // After stripping leading-slash base markers, reject values that are still absolute
+            // (Windows drive letters / UNC) or otherwise unsafe.
+            if (new File(relative).isAbsolute()) {
+                return null;
             }
             if (!isSafePath(relative)) {
                 return null;
@@ -349,6 +361,27 @@ public final class FileUtil {
     }
 
     /**
+     * <p>Like {@link #resolveContainedFile(File, String)} but refuses to return the base directory itself.
+     * Use this when the caller expects a file (or nested path) under the base — empty, {@code /}, {@code .},
+     * and {@code ./} children yield {@code null}.</p>
+     */
+    public static File resolveContainedChild(File baseDir, String childPath) {
+        File resolved = resolveContainedFile(baseDir, childPath);
+        if (resolved == null || baseDir == null) {
+            return null;
+        }
+        try {
+            File base = canonicalBase(baseDir);
+            if (resolved.equals(base)) {
+                return null;
+            }
+            return resolved;
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    /**
      * <p>Resolves successive relative segments under {@code baseDir}. Equivalent to nesting
      * {@link #resolveContainedFile(File, String)} calls.</p>
      */
@@ -358,6 +391,18 @@ public final class FileUtil {
             return null;
         }
         return resolveContainedFile(mid, secondChild);
+    }
+
+    /**
+     * <p>Resolves {@code firstChild} as a directory under {@code baseDir}, then {@code secondChild} as a
+     * real child that must not collapse back to that directory.</p>
+     */
+    public static File resolveContainedChild(File baseDir, String firstChild, String secondChild) {
+        File mid = resolveContainedFile(baseDir, firstChild);
+        if (mid == null) {
+            return null;
+        }
+        return resolveContainedChild(mid, secondChild);
     }
 
     /**

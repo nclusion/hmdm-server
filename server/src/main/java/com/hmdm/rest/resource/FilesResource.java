@@ -157,7 +157,7 @@ public class FilesResource {
 
             File customerBase = FileUtil.resolveContainedFile(this.baseDirectory, customer.getFilesDir());
             File targetFile = customerBase == null ? null
-                    : FileUtil.resolveContainedFile(customerBase, file.getPath(), file.getName());
+                    : FileUtil.resolveContainedChild(customerBase, file.getPath(), file.getName());
             if (targetFile == null) {
                 logger.error("Attempt to remove a file outside the customer files directory! path: {} name: {}",
                         file.getPath(), file.getName());
@@ -434,14 +434,19 @@ public class FilesResource {
     @Path("/{filePath}")
     @Produces(MediaType.APPLICATION_OCTET_STREAM)
     public javax.ws.rs.core.Response downloadFile(@PathParam("filePath") @ApiParam("A path to a file") String filePath) throws Exception {
-        String decoded = URLDecoder.decode(filePath, "UTF8");
-        File file = FileUtil.resolveContainedFile(this.baseDirectory, decoded);
-        if (file == null) {
+        if (!SecurityContext.get().hasPermission("files")) {
+            logger.error("Unauthorized attempt to download a file by user " +
+                    SecurityContext.get().getCurrentUserName());
             return javax.ws.rs.core.Response.status(403).build();
         }
-        if (!file.exists()) {
-            return javax.ws.rs.core.Response.status(404).build();
-        } else {
+        String decoded = URLDecoder.decode(filePath, "UTF8");
+        return SecurityContext.get().getCurrentUser().map(u -> {
+            Customer customer = customerDAO.findById(u.getCustomerId());
+            File customerBase = FileUtil.resolveContainedFile(this.baseDirectory, customer.getFilesDir());
+            File file = customerBase == null ? null : FileUtil.resolveContainedChild(customerBase, decoded);
+            if (file == null || !file.isFile()) {
+                return javax.ws.rs.core.Response.status(404).build();
+            }
             ContentDisposition contentDisposition = ContentDisposition.type("attachment").fileName(file.getName()).creationDate(new Date()).build();
             return javax.ws.rs.core.Response.ok( ( StreamingOutput ) output -> {
                 try {
@@ -450,8 +455,7 @@ public class FilesResource {
                     output.flush();
                 } catch ( Exception e ) { e.printStackTrace(); }
             } ).header( "Content-Disposition", contentDisposition ).build();
-
-        }
+        }).orElse(javax.ws.rs.core.Response.status(403).build());
     }
 
     private List<HFile> generateFilesList(String value) {

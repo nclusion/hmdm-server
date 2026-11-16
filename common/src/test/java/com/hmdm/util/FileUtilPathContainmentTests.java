@@ -47,7 +47,7 @@ public class FileUtilPathContainmentTests {
         File expected = new File(nestedDir, "app.apk");
         Assert.assertTrue(expected.createNewFile());
 
-        File resolved = FileUtil.resolveContainedFile(base, "customer/a/app.apk");
+        File resolved = FileUtil.resolveContainedChild(base, "customer/a/app.apk");
         Assert.assertNotNull(resolved);
         Assert.assertEquals(expected.getCanonicalFile(), resolved);
     }
@@ -58,9 +58,23 @@ public class FileUtilPathContainmentTests {
         File child = new File(base, "ok.txt");
         Assert.assertTrue(child.createNewFile());
 
-        File resolved = FileUtil.resolveContainedFile(base, "./ok.txt");
+        File resolved = FileUtil.resolveContainedChild(base, "./ok.txt");
         Assert.assertNotNull(resolved);
         Assert.assertEquals(child.getCanonicalFile(), resolved);
+    }
+
+    @Test
+    public void acceptsLeadingSlashAsRootOfBase() throws IOException {
+        File base = temporaryFolder.newFolder("files-slash");
+        File nested = new File(base, "sub");
+        Assert.assertTrue(nested.mkdirs());
+        File child = new File(nested, "ok.txt");
+        Assert.assertTrue(child.createNewFile());
+
+        File resolved = FileUtil.resolveContainedChild(base, "/sub/ok.txt");
+        Assert.assertNotNull(resolved);
+        Assert.assertEquals(child.getCanonicalFile(), resolved);
+        Assert.assertTrue(FileUtil.isSafePath("/sub/ok.txt"));
     }
 
     @Test
@@ -75,12 +89,26 @@ public class FileUtilPathContainmentTests {
     }
 
     @Test
-    public void rejectsAbsoluteChildPath() throws IOException {
+    public void unixAbsoluteChildDoesNotEscapeBase() throws IOException {
         File base = temporaryFolder.newFolder("files-abs");
         File outside = temporaryFolder.newFile("abs-secret.txt");
+        writeBytes(outside, "secret".getBytes(StandardCharsets.UTF_8));
 
-        Assert.assertNull(FileUtil.resolveContainedFile(base, outside.getAbsolutePath()));
-        Assert.assertFalse(FileUtil.isSafePath(outside.getAbsolutePath()));
+        // A Unix absolute path is treated as a root-of-base marker (leading '/' stripped),
+        // so the resolved file stays under base and is not the outside file.
+        File resolved = FileUtil.resolveContainedFile(base, outside.getAbsolutePath());
+        Assert.assertNotNull(resolved);
+        Assert.assertTrue(resolved.getCanonicalPath().startsWith(base.getCanonicalPath() + File.separator)
+                || resolved.getCanonicalPath().equals(base.getCanonicalPath()));
+        Assert.assertFalse(resolved.getCanonicalFile().equals(outside.getCanonicalFile()));
+    }
+
+    @Test
+    public void rejectsWindowsDriveAbsolute() throws IOException {
+        File base = temporaryFolder.newFolder("files-win");
+        Assert.assertNull(FileUtil.resolveContainedFile(base, "C:\\Windows\\system32\\drivers"));
+        Assert.assertFalse(FileUtil.isSafePath("C:\\Windows\\system32\\drivers"));
+        Assert.assertFalse(FileUtil.isSafePath("C:/Windows/system32"));
     }
 
     @Test
@@ -92,10 +120,11 @@ public class FileUtilPathContainmentTests {
         Assert.assertTrue(FileUtil.isSafePath("/"));
         Assert.assertTrue(FileUtil.isSafePath("nested/file.apk"));
         Assert.assertTrue(FileUtil.isSafePath("./nested/file.apk"));
+        Assert.assertTrue(FileUtil.isSafePath("/nested/file.apk"));
     }
 
     @Test
-    public void emptyChildResolvesToBase() throws IOException {
+    public void emptyChildResolvesToBaseButChildHelperRejects() throws IOException {
         File base = temporaryFolder.newFolder("files-empty");
         File resolved = FileUtil.resolveContainedFile(base, "");
         Assert.assertNotNull(resolved);
@@ -104,6 +133,11 @@ public class FileUtilPathContainmentTests {
         File slash = FileUtil.resolveContainedFile(base, "/");
         Assert.assertNotNull(slash);
         Assert.assertEquals(base.getCanonicalFile(), slash);
+
+        Assert.assertNull(FileUtil.resolveContainedChild(base, ""));
+        Assert.assertNull(FileUtil.resolveContainedChild(base, "/"));
+        Assert.assertNull(FileUtil.resolveContainedChild(base, "."));
+        Assert.assertNull(FileUtil.resolveContainedChild(base, "./"));
     }
 
     @Test
@@ -122,13 +156,15 @@ public class FileUtilPathContainmentTests {
     @Test
     public void twoSegmentResolveKeepsContainment() throws IOException {
         File base = temporaryFolder.newFolder("files-two");
-        File resolved = FileUtil.resolveContainedFile(base, "local", "name.apk");
+        File resolved = FileUtil.resolveContainedChild(base, "local", "name.apk");
         Assert.assertNotNull(resolved);
         Assert.assertTrue(resolved.getAbsolutePath().startsWith(base.getCanonicalFile().getAbsolutePath()));
         Assert.assertEquals("name.apk", resolved.getName());
 
-        Assert.assertNull(FileUtil.resolveContainedFile(base, "../escape", "name.apk"));
-        Assert.assertNull(FileUtil.resolveContainedFile(base, "local", "../escape.apk"));
+        Assert.assertNull(FileUtil.resolveContainedChild(base, "../escape", "name.apk"));
+        Assert.assertNull(FileUtil.resolveContainedChild(base, "local", "../escape.apk"));
+        Assert.assertNull(FileUtil.resolveContainedChild(base, "local", "."));
+        Assert.assertNull(FileUtil.resolveContainedChild(base, "local", "/"));
     }
 
     private static void writeBytes(File file, byte[] bytes) throws IOException {
