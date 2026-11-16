@@ -159,9 +159,7 @@ public class FilesResource {
             File targetFile = customerBase == null ? null
                     : FileUtil.resolveContainedChild(customerBase, file.getPath(), file.getName());
             if (targetFile == null) {
-                logger.error("Attempt to remove a file outside the customer files directory! path: {} name: {}",
-                        file.getPath() == null ? "" : file.getPath().replaceAll("[\r\n]", "_"),
-                        file.getName() == null ? "" : file.getName().replaceAll("[\r\n]", "_"));
+                logger.error("Attempt to remove a file outside the customer files directory");
                 return Response.PERMISSION_DENIED();
             }
 
