@@ -232,6 +232,20 @@ public class FileUtilPathContainmentTests {
     }
 
     @Test
+    public void resolveDoesNotCreateMissingDirectories() throws IOException {
+        File base = temporaryFolder.newFolder("files-no-mkdir");
+        File resolved = FileUtil.resolveContainedChild(base, "a/b/c", "nope.txt");
+        Assert.assertNotNull(resolved);
+        Assert.assertFalse(new File(base, "a").exists());
+        Assert.assertFalse(resolved.exists());
+
+        File missingBase = new File(temporaryFolder.getRoot(), "missing-base");
+        File underMissing = FileUtil.resolveContainedChild(missingBase, "child.txt");
+        Assert.assertNotNull(underMissing);
+        Assert.assertFalse(missingBase.exists());
+    }
+
+    @Test
     public void twoSegmentResolveKeepsContainment() throws IOException {
         File base = temporaryFolder.newFolder("files-two");
         File resolved = FileUtil.resolveContainedChild(base, "local", "name.apk");

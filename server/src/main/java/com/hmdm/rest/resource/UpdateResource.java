@@ -201,6 +201,10 @@ public class UpdateResource {
                 logger.warn("Refusing to write update file outside files directory: {}", getFileNameFromUrl(app.getUrl()));
                 return false;
             }
+            File parent = file.getParentFile();
+            if (parent != null) {
+                parent.mkdirs();
+            }
             inputStream = conn.getInputStream();
             if (!FileUtil.writeToFile(conn.getInputStream(), file)) {
                 return false;

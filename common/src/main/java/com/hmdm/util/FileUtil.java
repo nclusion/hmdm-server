@@ -255,6 +255,10 @@ public final class FileUtil {
         if (file.exists()) {
             file.delete();
         }
+        File parent = file.getParentFile();
+        if (parent != null) {
+            parent.mkdirs();
+        }
         FileOutputStream fos = new FileOutputStream(file);
         byte[] buffer = new byte[1024];
         int count=0;
@@ -494,11 +498,8 @@ public final class FileUtil {
     }
 
     private static File canonicalBase(File baseDir) throws IOException {
-        File base = baseDir.getAbsoluteFile();
-        if (!base.exists()) {
-            base.mkdirs();
-        }
-        return base.getCanonicalFile();
+        // Resolve only. Callers that write create directories after the path is proven contained.
+        return baseDir.getAbsoluteFile().getCanonicalFile();
     }
 
     private static String normalizeRelativeChild(String childPath) {
