@@ -88,8 +88,23 @@ public class DownloadFilesServletRangeTest {
     }
 
     @Test
-    public void endPastEof_isUnsatisfiable() {
-        Assert.assertNull(DownloadFilesServlet.resolveByteRange("0-1001", LENGTH));
+    public void endPastEof_isClampedToLength() {
+        DownloadFilesServlet.ResolvedByteRange range =
+                DownloadFilesServlet.resolveByteRange("0-1001", LENGTH);
+        Assert.assertNotNull(range);
+        Assert.assertEquals(0L, range.start);
+        Assert.assertEquals(LENGTH, range.end);
+        Assert.assertEquals(LENGTH, range.contentLength);
+    }
+
+    @Test
+    public void oversizedClosedWindow_isClamped() {
+        DownloadFilesServlet.ResolvedByteRange range =
+                DownloadFilesServlet.resolveByteRange("500-2147483647", LENGTH);
+        Assert.assertNotNull(range);
+        Assert.assertEquals(500L, range.start);
+        Assert.assertEquals(LENGTH, range.end);
+        Assert.assertEquals(500L, range.contentLength);
     }
 
     @Test
@@ -118,11 +133,10 @@ public class DownloadFilesServletRangeTest {
     }
 
     @Test
-    public void takesFirstRangeWhenCommaSeparated() {
-        DownloadFilesServlet.ResolvedByteRange range =
-                DownloadFilesServlet.resolveByteRange("10-20,30-40", LENGTH);
-        Assert.assertNotNull(range);
-        Assert.assertEquals(10L, range.start);
-        Assert.assertEquals(20L, range.end);
+    public void multiRange_isRejectedByParser() {
+        // doGet ignores multi-range headers and serves a full 200; the parser must not
+        // silently truncate to the first subrange if it is ever called with a comma.
+        Assert.assertNull(DownloadFilesServlet.resolveByteRange("10-20,30-40", LENGTH));
+        Assert.assertNull(DownloadFilesServlet.resolveByteRange("0-99,200-299", LENGTH));
     }
 }

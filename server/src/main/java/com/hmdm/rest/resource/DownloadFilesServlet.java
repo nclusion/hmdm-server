@@ -117,7 +117,9 @@ public class DownloadFilesServlet extends HttpServlet {
             }
 
             String range = req.getHeader("Range");
-            if (range != null && range.startsWith("bytes=")) {
+            // Multi-range is unsupported (no multipart/byteranges). Per RFC 7233 §3.3,
+            // ignore Range and serve the full representation instead of a partial 206.
+            if (range != null && range.startsWith("bytes=") && range.indexOf(',') < 0) {
                 sendPartialContent(range.substring(6), file, resp);
                 return;
             }
@@ -199,13 +201,10 @@ public class DownloadFilesServlet extends HttpServlet {
             return null;
         }
 
-        // Multiple ranges are not supported by this servlet.
         String single = rangeStr.trim();
-        int comma = single.indexOf(',');
-        if (comma >= 0) {
-            single = single.substring(0, comma).trim();
-        }
-        if (single.isEmpty()) {
+        // Caller should ignore multi-range headers and serve 200; never truncate to the
+        // first subrange (that would return a silent single-part 206 for a multi-range ask).
+        if (single.isEmpty() || single.indexOf(',') >= 0) {
             return null;
         }
 
@@ -241,9 +240,15 @@ public class DownloadFilesServlet extends HttpServlet {
                 }
             }
 
+            // RFC 7233: last-byte-pos beyond EOF is clamped; 416 is for first-byte-pos
+            // out of range. Under the historical half-open convention, clamp to length.
+            if (end > length) {
+                end = length;
+            }
+
             // Half-open historical bounds: 0 <= start <= end <= length and start < length.
             // (Inclusive RFC form would be 0 <= start <= end < length after defaulting end.)
-            if (start < 0 || end < start || end > length || start >= length) {
+            if (start < 0 || end < start || start >= length) {
                 return null;
             }
 
