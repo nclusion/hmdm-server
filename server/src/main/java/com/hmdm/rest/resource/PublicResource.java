@@ -224,7 +224,8 @@ public class PublicResource {
                         : FileUtil.resolveContainedChild(customerBase, request.getLocalPath(), request.getFileName());
                 if (uploadFile == null) {
                     logger.error("Attempt to upload a file outside the customer files directory! local path: {} file name: {}",
-                            request.getLocalPath(), request.getFileName());
+                            request.getLocalPath() == null ? "" : request.getLocalPath().replaceAll("[\r\n]", "_"),
+                            request.getFileName() == null ? "" : request.getFileName().replaceAll("[\r\n]", "_"));
                     return Response.PERMISSION_DENIED();
                 }
 

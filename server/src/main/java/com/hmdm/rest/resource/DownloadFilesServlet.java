@@ -109,7 +109,7 @@ public class DownloadFilesServlet extends HttpServlet {
 
         File file = FileUtil.resolveContainedChild(this.baseDirectory, path);
         if (file == null) {
-            log.warn("Rejected path outside files directory: {}", path);
+            log.warn("Rejected path outside files directory: {}", path.replaceAll("[\r\n]", "_"));
             resp.sendError(403);
             return;
         }

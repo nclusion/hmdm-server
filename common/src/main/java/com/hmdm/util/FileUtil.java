@@ -434,21 +434,31 @@ public final class FileUtil {
     }
 
     /**
-     * <p>Returns the canonical form of {@code candidate} when it already exists under {@code baseDir};
+     * <p>Returns the canonical form of {@code candidate} when it stays under {@code baseDir};
      * otherwise {@code null}. Useful when the caller already holds an absolute path (for example a temp file)
      * and needs to prove containment before opening it.</p>
+     *
+     * <p>The candidate is resolved with {@link Path#normalize()} and must pass
+     * {@link Path#startsWith(Path)} against the base before any file-system access. A later canonical
+     * check rejects symlink escapes.</p>
      */
     public static File confirmContained(File baseDir, String candidatePath) {
         if (baseDir == null || candidatePath == null || candidatePath.isEmpty()) {
             return null;
         }
         try {
-            File base = canonicalBase(baseDir);
-            File candidate = new File(candidatePath).getCanonicalFile();
-            if (!isUnderBase(base, candidate)) {
+            Path basePath = baseDir.getAbsoluteFile().toPath().normalize();
+            // An absolute candidate replaces the base. normalize + startsWith runs before file-system access.
+            Path resolved = basePath.resolve(candidatePath).normalize();
+            if (!resolved.startsWith(basePath)) {
                 return null;
             }
-            return candidate;
+            Path canonicalBase = basePath.toFile().getCanonicalFile().toPath();
+            Path canonical = resolved.toFile().getCanonicalFile().toPath();
+            if (!canonical.startsWith(canonicalBase)) {
+                return null;
+            }
+            return canonical.toFile();
         } catch (IOException e) {
             return null;
         } catch (RuntimeException e) {

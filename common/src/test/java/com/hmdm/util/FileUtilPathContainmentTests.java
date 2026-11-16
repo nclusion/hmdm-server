@@ -166,14 +166,10 @@ public class FileUtilPathContainmentTests {
     @Test
     public void confirmContainedAcceptsTempFile() throws IOException {
         File tmpBase = new File(System.getProperty("java.io.tmpdir"));
-        File temp = File.createTempFile("hmdm-path-test", ".temp");
-        try {
-            File confirmed = FileUtil.confirmContained(tmpBase, temp.getAbsolutePath());
-            Assert.assertNotNull(confirmed);
-            Assert.assertEquals(temp.getCanonicalFile(), confirmed);
-        } finally {
-            temp.delete();
-        }
+        File temp = temporaryFolder.newFile("hmdm-path-test.temp");
+        File confirmed = FileUtil.confirmContained(tmpBase, temp.getAbsolutePath());
+        Assert.assertNotNull(confirmed);
+        Assert.assertEquals(temp.getCanonicalFile(), confirmed);
     }
 
     @Test
