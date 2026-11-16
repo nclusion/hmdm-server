@@ -72,8 +72,8 @@ public class VideosResource {
             videoDir.mkdirs();
         }
 
-        String uploadedName = fileDetail.getFileName();
-        if (uploadedName == null || uploadedName.isEmpty()) {
+        String uploadedName = videoFileName(fileDetail.getFileName());
+        if (uploadedName == null) {
             return Response.ERROR("error.params.missing");
         }
         File uploadFile = FileUtil.resolveContainedChild(videoDir, uploadedName);
@@ -84,7 +84,7 @@ public class VideosResource {
             return Response.ERROR("error.file.save");
         }
         Video video = new Video();
-        video.setPath(String.format("%s/rest/public/videos/%s", this.baseUrl, URLEncoder.encode(uploadedName, "UTF8")));
+        video.setPath(String.format("%s/rest/public/videos/%s", this.baseUrl, encodeVideoPathSegment(uploadedName)));
         return Response.OK(video);
     }
 
@@ -115,5 +115,28 @@ public class VideosResource {
             } ).header( "Content-Disposition", contentDisposition ).build();
 
         }
+    }
+
+    /**
+     * Last path segment only. A multipart name may carry a Windows path; the video directory is flat.
+     */
+    static String videoFileName(String uploadedName) {
+        if (uploadedName == null) {
+            return null;
+        }
+        String normalized = uploadedName.replace('\\', '/').trim();
+        int slash = normalized.lastIndexOf('/');
+        String name = slash >= 0 ? normalized.substring(slash + 1) : normalized;
+        if (name.isEmpty() || ".".equals(name) || "..".equals(name)) {
+            return null;
+        }
+        return name;
+    }
+
+    /**
+     * Encode a single path segment. {@code URLEncoder} writes a space as {@code +}, which Jersey leaves literal.
+     */
+    static String encodeVideoPathSegment(String name) throws java.io.UnsupportedEncodingException {
+        return URLEncoder.encode(name, "UTF-8").replace("+", "%20");
     }
 }
