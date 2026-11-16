@@ -233,8 +233,6 @@ public class QRCodeResource {
                                 "}\n");
                         final String s = sb.toString();
 
-                        logger.info("The base for QR code generation:\n{}", s);
-
                         return javax.ws.rs.core.Response.ok( (StreamingOutput) output -> {
                             int imageSize = 250;
                             if (size != null) {
