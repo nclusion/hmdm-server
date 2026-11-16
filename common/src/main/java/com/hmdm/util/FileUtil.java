@@ -269,13 +269,23 @@ public final class FileUtil {
         if (path == null || path.isEmpty()) {
             return false;
         }
+        // Reject control characters (e.g. embedded NUL) that would make Path.resolve throw.
+        for (int i = 0; i < path.length(); i++) {
+            if (path.charAt(i) < 0x20) {
+                return false;
+            }
+        }
         String normalized = path.replace('\\', '/');
         // "/" or "./" alone means "base directory" — treated as a safe relative root marker.
         if ("/".equals(normalized) || "./".equals(normalized) || ".".equals(normalized)) {
             return true;
         }
+        // UNC must be rejected before stripping leading slashes.
+        if (normalized.startsWith("//")) {
+            return false;
+        }
         // Strip leading "./" and "/" root-of-base markers before absolute checks so values like
-        // "/subdir/file" (UI-relative) stay accepted while drive-letter/UNC forms are rejected.
+        // "/subdir/file" (UI-relative) stay accepted while drive-letter forms are rejected.
         while (normalized.startsWith("./")) {
             normalized = normalized.substring(2);
         }
@@ -288,8 +298,16 @@ public final class FileUtil {
         if (new File(normalized).isAbsolute()) {
             return false;
         }
-        // Reject Windows drive-letter forms even on non-Windows JVMs
-        if (normalized.length() >= 2 && Character.isLetter(normalized.charAt(0)) && normalized.charAt(1) == ':') {
+        // Reject Windows drive-letter forms only. Colon is otherwise a legal filename
+        // byte on Linux/Android (e.g. "backup:1.apk"); do not ban it per-segment —
+        // containment is proven by normalize + isUnderBase. Drive letters are specifically
+        // "X:" or "X:/..." — not "name:tag".
+        if (normalized.length() >= 2
+                && Character.isLetter(normalized.charAt(0))
+                && normalized.charAt(1) == ':'
+                && (normalized.length() == 2
+                    || normalized.charAt(2) == '/'
+                    || normalized.charAt(2) == '\\')) {
             return false;
         }
         String[] parts = normalized.split("/");
@@ -299,9 +317,6 @@ public final class FileUtil {
                 continue;
             }
             if ("..".equals(part)) {
-                return false;
-            }
-            if (part.indexOf(':') >= 0) {
                 return false;
             }
         }
@@ -356,6 +371,10 @@ public final class FileUtil {
             }
             return canonical;
         } catch (IOException e) {
+            return null;
+        } catch (RuntimeException e) {
+            // InvalidPathException (NUL / illegal chars) extends IllegalArgumentException;
+            // return null so callers keep their 403/404 instead of leaking a 500.
             return null;
         }
     }
@@ -423,6 +442,8 @@ public final class FileUtil {
             return candidate;
         } catch (IOException e) {
             return null;
+        } catch (RuntimeException e) {
+            return null;
         }
     }
 
@@ -448,6 +469,8 @@ public final class FileUtil {
             }
             return null;
         } catch (IOException e) {
+            return null;
+        } catch (RuntimeException e) {
             return null;
         }
     }

@@ -109,6 +109,28 @@ public class FileUtilPathContainmentTests {
         Assert.assertNull(FileUtil.resolveContainedFile(base, "C:\\Windows\\system32\\drivers"));
         Assert.assertFalse(FileUtil.isSafePath("C:\\Windows\\system32\\drivers"));
         Assert.assertFalse(FileUtil.isSafePath("C:/Windows/system32"));
+        Assert.assertFalse(FileUtil.isSafePath("//server/share/file"));
+    }
+
+    @Test
+    public void acceptsColonInFileName() throws IOException {
+        File base = temporaryFolder.newFolder("files-colon");
+        File child = new File(base, "backup:1.apk");
+        Assert.assertTrue(child.createNewFile());
+
+        Assert.assertTrue(FileUtil.isSafePath("backup:1.apk"));
+        Assert.assertTrue(FileUtil.isSafePath("2024:05:01 12:00:00.jpg"));
+        File resolved = FileUtil.resolveContainedChild(base, "backup:1.apk");
+        Assert.assertNotNull(resolved);
+        Assert.assertEquals(child.getCanonicalFile(), resolved);
+    }
+
+    @Test
+    public void rejectsControlCharactersWithoutThrowing() throws IOException {
+        File base = temporaryFolder.newFolder("files-nul");
+        Assert.assertFalse(FileUtil.isSafePath("a\u0000b"));
+        Assert.assertNull(FileUtil.resolveContainedChild(base, "a\u0000b"));
+        Assert.assertNull(FileUtil.resolveContainedChild(base, "ok\u0001name.apk"));
     }
 
     @Test
