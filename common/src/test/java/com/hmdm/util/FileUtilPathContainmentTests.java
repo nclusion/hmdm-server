@@ -21,6 +21,7 @@
 
 package com.hmdm.util;
 
+import com.hmdm.persistence.domain.Customer;
 import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
@@ -172,6 +173,61 @@ public class FileUtilPathContainmentTests {
             Assert.assertEquals(temp.getCanonicalFile(), confirmed);
         } finally {
             temp.delete();
+        }
+    }
+
+    @Test
+    public void confirmContainedRejectsTmpPrefixEscape() throws IOException {
+        File tmpBase = new File(System.getProperty("java.io.tmpdir"));
+        File escaped = new File(tmpBase, "subdir/../../outside-hmdm.txt");
+        Assert.assertTrue(escaped.getPath().startsWith(tmpBase.getPath())
+                || escaped.getAbsolutePath().startsWith(tmpBase.getAbsolutePath()));
+        Assert.assertNull(FileUtil.confirmContained(tmpBase, escaped.getPath()));
+
+        String sibling = tmpBase.getAbsolutePath();
+        if (sibling.endsWith(File.separator)) {
+            sibling = sibling.substring(0, sibling.length() - 1);
+        }
+        Assert.assertNull(FileUtil.confirmContained(tmpBase, sibling + "-evil/file.txt"));
+    }
+
+    @Test
+    public void moveFileRejectsSourceOutsideTmp() throws IOException {
+        File files = temporaryFolder.newFolder("customer-files");
+        String tmpProperty = System.getProperty("java.io.tmpdir");
+        String separator = tmpProperty.endsWith(File.separator) ? "" : File.separator;
+        // Textual prefix matches java.io.tmpdir; the canonical path does not.
+        String escaped = tmpProperty + separator + "a/../../hmdm-outside-not-a-file";
+        File canonical = new File(escaped).getCanonicalFile();
+        File tmpCanonical = new File(tmpProperty).getCanonicalFile();
+        Assert.assertFalse(canonical.equals(tmpCanonical));
+        Assert.assertFalse(canonical.getPath().startsWith(tmpCanonical.getPath() + File.separator));
+
+        Customer customer = new Customer();
+        customer.setFilesDir(null);
+        File moved = FileUtil.moveFile(customer, files.getAbsolutePath(), "/", escaped);
+        Assert.assertNull(moved);
+        Assert.assertFalse(new File(files, "hmdm-outside-not-a-file").exists());
+    }
+
+    @Test
+    public void moveFileAcceptsRealTempFile() throws IOException {
+        File files = temporaryFolder.newFolder("customer-files-ok");
+        File temp = FileUtil.createTempFile("app.apk");
+        try {
+            writeBytes(temp, "apk".getBytes(StandardCharsets.UTF_8));
+            Customer customer = new Customer();
+            customer.setFilesDir("");
+            File moved = FileUtil.moveFile(customer, files.getAbsolutePath(), "/", temp.getAbsolutePath());
+            Assert.assertNotNull(moved);
+            Assert.assertTrue(moved.isFile());
+            Assert.assertEquals("app.apk", moved.getName());
+            Assert.assertTrue(moved.getCanonicalPath().startsWith(files.getCanonicalPath() + File.separator));
+            Assert.assertFalse(temp.exists());
+        } finally {
+            if (temp.exists()) {
+                temp.delete();
+            }
         }
     }
 

@@ -131,8 +131,13 @@ public final class FileUtil {
      * @throws FileExistsException if file already exists in
      */
     public static File moveFile(Customer customer, String filesDirectory, String localPath, String tmpFilePath) {
-        File localFile = new File(tmpFilePath);
-        String fileName = getNameFromTmpPath(tmpFilePath);
+        // A textual startsWith(tmpdir) check accepts "<tmpdir>/../outside" and "<tmpdir>-sibling".
+        File tmpDir = new File(System.getProperty("java.io.tmpdir"));
+        File localFile = confirmContained(tmpDir, tmpFilePath);
+        if (localFile == null || !localFile.isFile()) {
+            return null;
+        }
+        String fileName = getNameFromTmpPath(localFile.getPath());
 
         File filesBase = new File(filesDirectory);
         File customerBase = resolveContainedFile(filesBase, nullToEmpty(customer.getFilesDir()));

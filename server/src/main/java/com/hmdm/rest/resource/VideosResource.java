@@ -30,7 +30,6 @@ import org.glassfish.jersey.media.multipart.FormDataParam;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
-import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.util.Date;
 import javax.ws.rs.Consumes;
@@ -98,7 +97,8 @@ public class VideosResource {
             videoDir.mkdirs();
         }
 
-        File videoFile = FileUtil.resolveContainedChild(videoDir, URLDecoder.decode(fileName, "UTF8"));
+        // Jersey already percent-decodes @PathParam; do not decode again.
+        File videoFile = FileUtil.resolveContainedChild(videoDir, fileName);
         if (videoFile == null) {
             return javax.ws.rs.core.Response.status(403).build();
         }

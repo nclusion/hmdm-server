@@ -202,9 +202,9 @@ public class FilesResource {
         if (moveFileRequest.getLocalPath() == null || moveFileRequest.getLocalPath().equals("")) {
             moveFileRequest.setLocalPath("/");
         }
-        String tmpdir = System.getProperty("java.io.tmpdir");
+        File tmpDir = new File(System.getProperty("java.io.tmpdir"));
         if (!FileUtil.isSafePath(moveFileRequest.getLocalPath()) ||
-            !moveFileRequest.getPath().startsWith(tmpdir)) {
+            FileUtil.confirmContained(tmpDir, moveFileRequest.getPath()) == null) {
             logger.error("Attempt to move a file with unsafe path! local path: " + moveFileRequest.getLocalPath() +
                     " path: " + moveFileRequest.getPath());
             return Response.PERMISSION_DENIED();
@@ -439,11 +439,12 @@ public class FilesResource {
                     SecurityContext.get().getCurrentUserName());
             return javax.ws.rs.core.Response.status(403).build();
         }
-        String decoded = URLDecoder.decode(filePath, "UTF8");
+        // Jersey already percent-decodes @PathParam. A second URLDecoder.decode
+        // turns '+' into a space and throws on a literal '%'.
         return SecurityContext.get().getCurrentUser().map(u -> {
             Customer customer = customerDAO.findById(u.getCustomerId());
             File customerBase = FileUtil.resolveContainedFile(this.baseDirectory, customer.getFilesDir());
-            File file = customerBase == null ? null : FileUtil.resolveContainedChild(customerBase, decoded);
+            File file = customerBase == null ? null : FileUtil.resolveContainedChild(customerBase, filePath);
             if (file == null || !file.isFile()) {
                 return javax.ws.rs.core.Response.status(404).build();
             }
