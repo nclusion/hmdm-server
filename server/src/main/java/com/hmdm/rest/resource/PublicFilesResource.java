@@ -22,6 +22,7 @@
 package com.hmdm.rest.resource;
 
 import javax.inject.Inject;
+import javax.inject.Named;
 import javax.inject.Singleton;
 import org.glassfish.jersey.media.multipart.ContentDisposition;
 import org.apache.poi.util.IOUtils;
@@ -38,6 +39,8 @@ import java.io.InputStream;
 import java.net.URLDecoder;
 import java.util.Date;
 
+import com.hmdm.util.FileUtil;
+
 /**
  * <p>A REST API for accessing the files from mobile applications.</p>
  *
@@ -51,8 +54,15 @@ import java.util.Date;
 @Deprecated
 public class PublicFilesResource {
 
-    @Inject
+    private final File baseDirectory;
+
     public PublicFilesResource() {
+        this.baseDirectory = null;
+    }
+
+    @Inject
+    public PublicFilesResource(@Named("files.directory") String filesDirectory) {
+        this.baseDirectory = new File(filesDirectory);
     }
 
     /**
@@ -68,7 +78,14 @@ public class PublicFilesResource {
     public javax.ws.rs.core.Response downloadFile(@PathParam("filePath") String filePath) throws Exception {
         // TODO : ISV : Needs to identify the device and do a security check if device is granted access to specified
         //  file
-        File file = new File(filePath + "/" + URLDecoder.decode(filePath, "UTF8"));
+        if (this.baseDirectory == null) {
+            return javax.ws.rs.core.Response.status(500).build();
+        }
+        String decoded = URLDecoder.decode(filePath, "UTF8");
+        File file = FileUtil.resolveContainedFile(this.baseDirectory, decoded);
+        if (file == null) {
+            return javax.ws.rs.core.Response.status(403).build();
+        }
         if (!file.exists()) {
             return javax.ws.rs.core.Response.status(404).build();
         } else {

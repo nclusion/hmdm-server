@@ -41,7 +41,6 @@ import java.io.InputStream;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.Date;
 import java.util.LinkedList;
 import java.util.List;
@@ -156,11 +155,13 @@ public class FilesResource {
         return SecurityContext.get().getCurrentUser().map(u -> {
             Customer customer = customerDAO.findById(u.getCustomerId());
 
-            java.nio.file.Path filePath;
-            if (customer.getFilesDir() == null || customer.getFilesDir().isEmpty()) {
-                filePath = Paths.get( this.filesDirectory, file.getPath(), file.getName());
-            } else {
-                filePath = Paths.get(this.filesDirectory, customer.getFilesDir(), file.getPath(), file.getName());
+            File customerBase = FileUtil.resolveContainedFile(this.baseDirectory, customer.getFilesDir());
+            File targetFile = customerBase == null ? null
+                    : FileUtil.resolveContainedFile(customerBase, file.getPath(), file.getName());
+            if (targetFile == null) {
+                logger.error("Attempt to remove a file outside the customer files directory! path: {} name: {}",
+                        file.getPath(), file.getName());
+                return Response.PERMISSION_DENIED();
             }
 
             // Check if file is not used
@@ -175,7 +176,7 @@ public class FilesResource {
             }
 
             try {
-                Files.delete(filePath);
+                Files.delete(targetFile.toPath());
                 return Response.OK();
             } catch (IOException e) {
                 e.printStackTrace();
@@ -339,7 +340,7 @@ public class FilesResource {
             String fileName = new String(fileDetail.getFileName().getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
             String adjustedFileName = FileUtil.adjustFileName(fileName);
             File uploadFile = FileUtil.createTempFile(adjustedFileName);
-            FileUtil.writeToFile(uploadedInputStream, uploadFile.getAbsolutePath());
+            FileUtil.writeToFile(uploadedInputStream, uploadFile);
 
             FileUploadResult result = new FileUploadResult();
 
@@ -433,7 +434,11 @@ public class FilesResource {
     @Path("/{filePath}")
     @Produces(MediaType.APPLICATION_OCTET_STREAM)
     public javax.ws.rs.core.Response downloadFile(@PathParam("filePath") @ApiParam("A path to a file") String filePath) throws Exception {
-        File file = new File(filePath + "/" + URLDecoder.decode(filePath, "UTF8"));
+        String decoded = URLDecoder.decode(filePath, "UTF8");
+        File file = FileUtil.resolveContainedFile(this.baseDirectory, decoded);
+        if (file == null) {
+            return javax.ws.rs.core.Response.status(403).build();
+        }
         if (!file.exists()) {
             return javax.ws.rs.core.Response.status(404).build();
         } else {
@@ -454,7 +459,10 @@ public class FilesResource {
             Customer customer = customerDAO.findById(u.getCustomerId());
 
             List<HFile> result = new LinkedList<>();
-            this.handleFile(new File(this.baseDirectory, customer.getFilesDir()), result, value, customer);
+            File customerDir = FileUtil.resolveContainedFile(this.baseDirectory, customer.getFilesDir());
+            if (customerDir != null) {
+                this.handleFile(customerDir, result, value, customer);
+            }
             return result;
 
         }).orElse(new LinkedList<>());

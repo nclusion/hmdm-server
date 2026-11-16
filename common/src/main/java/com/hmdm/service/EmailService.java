@@ -242,18 +242,18 @@ public class EmailService {
 
     // Default language is English
     private String getLocalizedText(String path, String language) {
-        if (language == null || language.equals("")) {
+        if (language == null || language.equals("") || !isSafeLanguageCode(language)) {
             language = "en";
         }
 
-        File file = new File(path.replace("_LANGUAGE_", language));
+        File file = resolveEmailTemplateFile(path, language);
         String ret = readFile(file);
-        if (ret == null) {
-            file = new File(path.replace("_LANGUAGE_", "en"));
+        if (ret == null && !"en".equals(language)) {
+            file = resolveEmailTemplateFile(path, "en");
             ret = readFile(file);
         }
         if (ret == null) {
-            logger.error("Email template not found: " + file.getAbsolutePath());
+            logger.error("Email template not found: " + (file == null ? path : file.getAbsolutePath()));
             return null;
         }
 
@@ -262,8 +262,25 @@ public class EmailService {
                 .replace("${appName}", appName);
     }
 
+    private static boolean isSafeLanguageCode(String language) {
+        // Language codes used in email template directories are short alphabetic tokens (e.g. "en", "ru").
+        return language.matches("[A-Za-z]{2,8}");
+    }
+
+    private File resolveEmailTemplateFile(String pathTemplate, String language) {
+        int marker = pathTemplate.indexOf("_LANGUAGE_");
+        if (marker < 0) {
+            // Configured path has no language placeholder; treat the configured path as trusted.
+            return new File(pathTemplate);
+        }
+        File emailsBase = new File(pathTemplate.substring(0, marker));
+        String remainder = language + pathTemplate.substring(marker + "_LANGUAGE_".length());
+        // remainder is like "en/recovery_subj.txt" — must stay under the emails base directory.
+        return com.hmdm.util.FileUtil.resolveContainedFile(emailsBase, remainder);
+    }
+
     private String readFile(File file) {
-        if (file.exists()) {
+        if (file != null && file.exists()) {
             try {
                 return FileUtils.readFileToString(file, "UTF-8");
             } catch (IOException e) {

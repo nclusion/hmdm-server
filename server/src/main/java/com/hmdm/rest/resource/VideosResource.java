@@ -44,6 +44,7 @@ import javax.ws.rs.core.StreamingOutput;
 import org.apache.poi.util.IOUtils;
 import com.hmdm.persistence.domain.Video;
 import com.hmdm.rest.json.Response;
+import com.hmdm.util.FileUtil;
 
 import static com.hmdm.util.FileUtil.writeToFile;
 
@@ -72,8 +73,11 @@ public class VideosResource {
             videoDir.mkdirs();
         }
 
-        File uploadFile = new File(videoDir.getAbsolutePath(), fileDetail.getFileName());
-        writeToFile(uploadedInputStream, uploadFile.getAbsolutePath());
+        File uploadFile = FileUtil.resolveContainedFile(videoDir, fileDetail.getFileName());
+        if (uploadFile == null) {
+            return Response.PERMISSION_DENIED();
+        }
+        writeToFile(uploadedInputStream, uploadFile);
         Video video = new Video();
         video.setPath(String.format("%s/rest/public/videos/%s", this.baseUrl, URLEncoder.encode(fileDetail.getFileName(), "UTF8")));
         return Response.OK(video);
@@ -88,7 +92,10 @@ public class VideosResource {
             videoDir.mkdirs();
         }
 
-        File videoFile = new File(videoDir, URLDecoder.decode(fileName, "UTF8"));
+        File videoFile = FileUtil.resolveContainedFile(videoDir, URLDecoder.decode(fileName, "UTF8"));
+        if (videoFile == null) {
+            return javax.ws.rs.core.Response.status(403).build();
+        }
         if (!videoFile.exists()) {
             return javax.ws.rs.core.Response.status(404).build();
         } else {
