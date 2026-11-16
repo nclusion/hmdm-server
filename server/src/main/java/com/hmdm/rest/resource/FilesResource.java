@@ -340,7 +340,11 @@ public class FilesResource {
             String fileName = new String(fileDetail.getFileName().getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
             String adjustedFileName = FileUtil.adjustFileName(fileName);
             File uploadFile = FileUtil.createTempFile(adjustedFileName);
-            FileUtil.writeToFile(uploadedInputStream, uploadFile);
+            if (!FileUtil.writeToFile(uploadedInputStream, uploadFile)) {
+                uploadFile.delete();
+                logger.error("Failed to write uploaded file to {}", uploadFile.getAbsolutePath());
+                return Response.INTERNAL_ERROR();
+            }
 
             FileUploadResult result = new FileUploadResult();
 

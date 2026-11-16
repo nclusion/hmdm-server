@@ -168,7 +168,13 @@ public class PublicResource {
                     errors.add("fileName");
                 }
             }
-            if (!FileUtil.isSafePath(request.getLocalPath()) || !FileUtil.isSafePath(request.getFileName())) {
+            // Empty localPath/fileName means "no path" on a metadata-only upload.
+            // isSafePath rejects "", so only validate values that were actually sent.
+            boolean unsafeLocalPath = request.getLocalPath() != null && !request.getLocalPath().isEmpty()
+                    && !FileUtil.isSafePath(request.getLocalPath());
+            boolean unsafeFileName = request.getFileName() != null && !request.getFileName().isEmpty()
+                    && !FileUtil.isSafePath(request.getFileName());
+            if (unsafeLocalPath || unsafeFileName) {
                 logger.error("Attempt to upload a file to unsafe path! local path: " + request.getLocalPath() +
                         " File name: " + request.getFileName());
                 return Response.PERMISSION_DENIED();
