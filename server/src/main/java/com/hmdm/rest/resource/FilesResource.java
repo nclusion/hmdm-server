@@ -201,9 +201,11 @@ public class FilesResource {
         if (moveFileRequest.getLocalPath() == null || moveFileRequest.getLocalPath().equals("")) {
             moveFileRequest.setLocalPath("/");
         }
-        String tmpdir = System.getProperty("java.io.tmpdir");
+        String stagedRoot = FileUtil.uploadTempDirectoryPath(this.filesDirectory);
         if (!FileUtil.isSafePath(moveFileRequest.getLocalPath()) ||
-            !moveFileRequest.getPath().startsWith(tmpdir)) {
+            moveFileRequest.getPath() == null ||
+            stagedRoot.isEmpty() ||
+            !moveFileRequest.getPath().startsWith(stagedRoot + File.separator)) {
             logger.error("Attempt to move a file with unsafe path! local path: " + moveFileRequest.getLocalPath() +
                     " path: " + moveFileRequest.getPath());
             return Response.PERMISSION_DENIED();
@@ -338,7 +340,7 @@ public class FilesResource {
             // https://stackoverflow.com/questions/50582435/jersey-filename-encoded
             String fileName = new String(fileDetail.getFileName().getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
             String adjustedFileName = FileUtil.adjustFileName(fileName);
-            File uploadFile = FileUtil.createTempFile(adjustedFileName);
+            File uploadFile = FileUtil.createTempFile(this.filesDirectory, adjustedFileName);
             FileUtil.writeToFile(uploadedInputStream, uploadFile.getAbsolutePath());
 
             FileUploadResult result = new FileUploadResult();
