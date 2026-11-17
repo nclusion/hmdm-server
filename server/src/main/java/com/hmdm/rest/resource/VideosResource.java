@@ -30,7 +30,6 @@ import org.glassfish.jersey.media.multipart.FormDataParam;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
-import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.util.Date;
 import javax.ws.rs.Consumes;
@@ -44,6 +43,7 @@ import javax.ws.rs.core.StreamingOutput;
 import org.apache.poi.util.IOUtils;
 import com.hmdm.persistence.domain.Video;
 import com.hmdm.rest.json.Response;
+import com.hmdm.util.FileUtil;
 
 import static com.hmdm.util.FileUtil.writeToFile;
 
@@ -72,10 +72,19 @@ public class VideosResource {
             videoDir.mkdirs();
         }
 
-        File uploadFile = new File(videoDir.getAbsolutePath(), fileDetail.getFileName());
-        writeToFile(uploadedInputStream, uploadFile.getAbsolutePath());
+        String uploadedName = videoFileName(fileDetail.getFileName());
+        if (uploadedName == null) {
+            return Response.ERROR("error.params.missing");
+        }
+        File uploadFile = FileUtil.resolveContainedChild(videoDir, uploadedName);
+        if (uploadFile == null) {
+            return Response.PERMISSION_DENIED();
+        }
+        if (!writeToFile(uploadedInputStream, uploadFile)) {
+            return Response.ERROR("error.file.save");
+        }
         Video video = new Video();
-        video.setPath(String.format("%s/rest/public/videos/%s", this.baseUrl, URLEncoder.encode(fileDetail.getFileName(), "UTF8")));
+        video.setPath(String.format("%s/rest/public/videos/%s", this.baseUrl, encodeVideoPathSegment(uploadedName)));
         return Response.OK(video);
     }
 
@@ -88,8 +97,12 @@ public class VideosResource {
             videoDir.mkdirs();
         }
 
-        File videoFile = new File(videoDir, URLDecoder.decode(fileName, "UTF8"));
-        if (!videoFile.exists()) {
+        // Jersey already percent-decodes @PathParam; do not decode again.
+        File videoFile = FileUtil.resolveContainedChild(videoDir, fileName);
+        if (videoFile == null) {
+            return javax.ws.rs.core.Response.status(403).build();
+        }
+        if (!videoFile.isFile()) {
             return javax.ws.rs.core.Response.status(404).build();
         } else {
             ContentDisposition contentDisposition = ContentDisposition.type("attachment").fileName(videoFile.getName()).creationDate(new Date()).build();
@@ -102,5 +115,28 @@ public class VideosResource {
             } ).header( "Content-Disposition", contentDisposition ).build();
 
         }
+    }
+
+    /**
+     * Last path segment only. A multipart name may carry a Windows path; the video directory is flat.
+     */
+    static String videoFileName(String uploadedName) {
+        if (uploadedName == null) {
+            return null;
+        }
+        String normalized = uploadedName.replace('\\', '/').trim();
+        int slash = normalized.lastIndexOf('/');
+        String name = slash >= 0 ? normalized.substring(slash + 1) : normalized;
+        if (name.isEmpty() || ".".equals(name) || "..".equals(name)) {
+            return null;
+        }
+        return name;
+    }
+
+    /**
+     * Encode a single path segment. {@code URLEncoder} writes a space as {@code +}, which Jersey leaves literal.
+     */
+    static String encodeVideoPathSegment(String name) throws java.io.UnsupportedEncodingException {
+        return URLEncoder.encode(name, "UTF-8").replace("+", "%20");
     }
 }
