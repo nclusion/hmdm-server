@@ -242,7 +242,7 @@ public class UpdateResource {
             }
 
             // We download to the temp file to reuse the existing Application management API
-            File tempFile = FileUtil.createTempFile(FileUtil.adjustFileName(name));
+            File tempFile = FileUtil.createTempFile(this.filesDirectory, FileUtil.adjustFileName(name));
             FileUtil.writeToFile(new URL(app.getUrl()).openStream(), tempFile.getAbsolutePath());
 
             APKFileDetails fileDetails = apkFileAnalyzer.analyzeFile(tempFile.getAbsolutePath());
