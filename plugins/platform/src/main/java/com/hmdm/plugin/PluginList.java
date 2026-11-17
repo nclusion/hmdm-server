@@ -74,9 +74,15 @@ public final class PluginList {
         if (initialized) {
             return;
         }
-        try (ScanResult scanResult = new ClassGraph().enableAllInfo().whitelistPackages("com.hmdm").scan()) {
+        try (ScanResult scanResult = new ClassGraph().enableAllInfo().acceptPackages("com.hmdm").scan()) {
             ClassInfoList pluginConfigClasses = scanResult.getClassesImplementing(PluginConfiguration.class.getName());
             List<String> plugins = pluginConfigClasses.getNames();
+            if (plugins.isEmpty()) {
+                log.warn("ClassGraph scan found no PluginConfiguration implementers under com.hmdm; "
+                        + "plugins will stay disabled");
+            } else {
+                log.info("Discovered {} plugin configuration(s): {}", plugins.size(), plugins);
+            }
 
             List<Module> result = new ArrayList<>();
             List<Class<? extends PluginTaskModule>> pluginTaskModules = new ArrayList<>();
