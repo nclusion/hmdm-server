@@ -41,7 +41,6 @@ import java.io.InputStream;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.Date;
 import java.util.LinkedList;
 import java.util.List;
@@ -156,11 +155,12 @@ public class FilesResource {
         return SecurityContext.get().getCurrentUser().map(u -> {
             Customer customer = customerDAO.findById(u.getCustomerId());
 
-            java.nio.file.Path filePath;
-            if (customer.getFilesDir() == null || customer.getFilesDir().isEmpty()) {
-                filePath = Paths.get( this.filesDirectory, file.getPath(), file.getName());
-            } else {
-                filePath = Paths.get(this.filesDirectory, customer.getFilesDir(), file.getPath(), file.getName());
+            File customerBase = FileUtil.resolveContainedFile(this.baseDirectory, customer.getFilesDir());
+            File targetFile = customerBase == null ? null
+                    : FileUtil.resolveContainedChild(customerBase, file.getPath(), file.getName());
+            if (targetFile == null) {
+                logger.error("Attempt to remove a file outside the customer files directory");
+                return Response.PERMISSION_DENIED();
             }
 
             // Check if file is not used
@@ -175,7 +175,7 @@ public class FilesResource {
             }
 
             try {
-                Files.delete(filePath);
+                Files.delete(targetFile.toPath());
                 return Response.OK();
             } catch (IOException e) {
                 e.printStackTrace();
@@ -212,13 +212,15 @@ public class FilesResource {
             Customer customer = customerDAO.findById(u.getCustomerId());
             try {
                 File movedFile = FileUtil.moveFile(customer, filesDirectory, moveFileRequest.getLocalPath(), moveFileRequest.getPath());
-                if (movedFile != null) {
+                File customerBase = FileUtil.resolveContainedFile(this.baseDirectory, customer.getFilesDir());
+                if (movedFile != null && customerBase != null) {
                     List<HFile> result = new LinkedList<>();
-                    handleFile(movedFile, result, null, customer);
-                    return Response.OK(result.get(0));
-                } else {
-                    return Response.ERROR("error.file.save");
+                    handleFile(movedFile, result, null, customer, customerBase);
+                    if (!result.isEmpty()) {
+                        return Response.OK(result.get(0));
+                    }
                 }
+                return Response.ERROR("error.file.save");
             } catch (FileExistsException e) {
                 logger.warn("File {} already exists", moveFileRequest.getLocalPath());
                 return Response.FILE_EXISTS();
@@ -338,7 +340,11 @@ public class FilesResource {
             String fileName = new String(fileDetail.getFileName().getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
             String adjustedFileName = FileUtil.adjustFileName(fileName);
             File uploadFile = FileUtil.createTempFile(this.filesDirectory, adjustedFileName);
-            FileUtil.writeToFile(uploadedInputStream, uploadFile.getAbsolutePath());
+            if (!FileUtil.writeToFile(uploadedInputStream, uploadFile)) {
+                uploadFile.delete();
+                logger.error("Failed to write uploaded file to {}", uploadFile.getAbsolutePath());
+                return Response.INTERNAL_ERROR();
+            }
 
             FileUploadResult result = new FileUploadResult();
 
@@ -432,10 +438,20 @@ public class FilesResource {
     @Path("/{filePath}")
     @Produces(MediaType.APPLICATION_OCTET_STREAM)
     public javax.ws.rs.core.Response downloadFile(@PathParam("filePath") @ApiParam("A path to a file") String filePath) throws Exception {
-        File file = new File(filePath + "/" + URLDecoder.decode(filePath, "UTF8"));
-        if (!file.exists()) {
-            return javax.ws.rs.core.Response.status(404).build();
-        } else {
+        if (!SecurityContext.get().hasPermission("files")) {
+            logger.error("Unauthorized attempt to download a file by user " +
+                    SecurityContext.get().getCurrentUserName());
+            return javax.ws.rs.core.Response.status(403).build();
+        }
+        // Jersey already percent-decodes @PathParam. A second URLDecoder.decode
+        // turns '+' into a space and throws on a literal '%'.
+        return SecurityContext.get().getCurrentUser().map(u -> {
+            Customer customer = customerDAO.findById(u.getCustomerId());
+            File customerBase = FileUtil.resolveContainedFile(this.baseDirectory, customer.getFilesDir());
+            File file = customerBase == null ? null : FileUtil.resolveContainedChild(customerBase, filePath);
+            if (file == null || !file.isFile()) {
+                return javax.ws.rs.core.Response.status(404).build();
+            }
             ContentDisposition contentDisposition = ContentDisposition.type("attachment").fileName(file.getName()).creationDate(new Date()).build();
             return javax.ws.rs.core.Response.ok( ( StreamingOutput ) output -> {
                 try {
@@ -444,8 +460,7 @@ public class FilesResource {
                     output.flush();
                 } catch ( Exception e ) { e.printStackTrace(); }
             } ).header( "Content-Disposition", contentDisposition ).build();
-
-        }
+        }).orElse(javax.ws.rs.core.Response.status(403).build());
     }
 
     private List<HFile> generateFilesList(String value) {
@@ -453,7 +468,10 @@ public class FilesResource {
             Customer customer = customerDAO.findById(u.getCustomerId());
 
             List<HFile> result = new LinkedList<>();
-            this.handleFile(new File(this.baseDirectory, customer.getFilesDir()), result, value, customer);
+            File customerDir = FileUtil.resolveContainedFile(this.baseDirectory, customer.getFilesDir());
+            if (customerDir != null) {
+                this.handleFile(customerDir, result, value, customer, customerDir);
+            }
             return result;
 
         }).orElse(new LinkedList<>());
@@ -463,7 +481,7 @@ public class FilesResource {
         return files;
     }
 
-    private void handleFile(File file, List<HFile> result, String value, Customer customer) {
+    private void handleFile(File file, List<HFile> result, String value, Customer customer, File customerDir) {
         final String customerFilesBaseDir = customer.getFilesDir();
         if (file != null && file.exists()) {
             if (file.isDirectory()) {
@@ -473,20 +491,30 @@ public class FilesResource {
 
                 for(int i = 0; i < length; ++i) {
                     File fl = filesArray[i];
-                    this.handleFile(fl, result, value, customer);
+                    this.handleFile(fl, result, value, customer, customerDir);
                 }
             } else if (value == null || file.getName().contains(value)) {
-
-                String path = file.getParentFile().getAbsolutePath().replace(this.filesDirectory.replace("/", File.separator), "");
-                if (!path.endsWith(File.separator)) {
-                    path += File.separator;
+                final String relative;
+                try {
+                    relative = relativeDirectory(customerDir, file);
+                } catch (IOException e) {
+                    logger.error("Failed to resolve listed file path for {}", file.getAbsolutePath(), e);
+                    return;
                 }
+                if (relative == null) {
+                    return;
+                }
+
+                String path;
                 String url;
                 if (customerFilesBaseDir != null && !customerFilesBaseDir.isEmpty()) {
-                    path = path.substring((File.separator + customerFilesBaseDir + File.separator).length()); // Strip off the name of directory for customer files
-                    url = String.format("%s/files/%s/%s", this.baseUrl, customerFilesBaseDir, path.replace(File.separator, "/") + file.getName());
+                    path = relative.isEmpty() ? "" : relative.replace("/", File.separator) + File.separator;
+                    url = String.format("%s/files/%s/%s%s", this.baseUrl, customerFilesBaseDir,
+                            relative.isEmpty() ? "" : relative + "/", file.getName());
                 } else {
-                    url = String.format("%s/files%s", this.baseUrl, path.replace(File.separator, "/") + file.getName());
+                    path = File.separator + (relative.isEmpty() ? "" : relative.replace("/", File.separator) + File.separator);
+                    url = String.format("%s/files%s", this.baseUrl,
+                            (relative.isEmpty() ? "/" : "/" + relative + "/") + file.getName());
                 }
 
                 final HFile fileObj = new HFile(path, file.getName(), url, file.length());
@@ -499,5 +527,21 @@ public class FilesResource {
             }
         }
 
+    }
+
+    /**
+     * Directory of {@code file} relative to the canonical {@code customerDir}, using {@code /}.
+     * Empty when the file sits directly in {@code customerDir}. {@code null} when the file is outside that directory.
+     */
+    static String relativeDirectory(File customerDir, File file) throws IOException {
+        if (customerDir == null || file == null || file.getParentFile() == null) {
+            return null;
+        }
+        java.nio.file.Path basePath = customerDir.getCanonicalFile().toPath();
+        java.nio.file.Path parentPath = file.getParentFile().getCanonicalFile().toPath();
+        if (!parentPath.startsWith(basePath)) {
+            return null;
+        }
+        return basePath.relativize(parentPath).toString().replace('\\', '/');
     }
 }

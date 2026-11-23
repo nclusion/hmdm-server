@@ -44,6 +44,7 @@ import javax.ws.rs.core.StreamingOutput;
 import org.apache.poi.util.IOUtils;
 import com.hmdm.persistence.domain.Video;
 import com.hmdm.rest.json.Response;
+import com.hmdm.util.FileUtil;
 
 import static com.hmdm.util.FileUtil.writeToFile;
 
@@ -72,10 +73,19 @@ public class VideosResource {
             videoDir.mkdirs();
         }
 
-        File uploadFile = new File(videoDir.getAbsolutePath(), fileDetail.getFileName());
-        writeToFile(uploadedInputStream, uploadFile.getAbsolutePath());
+        String uploadedName = videoFileName(fileDetail.getFileName());
+        if (uploadedName == null) {
+            return Response.ERROR("error.params.missing");
+        }
+        File uploadFile = FileUtil.resolveContainedChild(videoDir, uploadedName);
+        if (uploadFile == null) {
+            return Response.PERMISSION_DENIED();
+        }
+        if (!writeToFile(uploadedInputStream, uploadFile)) {
+            return Response.ERROR("error.file.save");
+        }
         Video video = new Video();
-        video.setPath(String.format("%s/rest/public/videos/%s", this.baseUrl, URLEncoder.encode(fileDetail.getFileName(), "UTF8")));
+        video.setPath(String.format("%s/rest/public/videos/%s", this.baseUrl, encodeVideoPathSegment(uploadedName)));
         return Response.OK(video);
     }
 
@@ -88,8 +98,11 @@ public class VideosResource {
             videoDir.mkdirs();
         }
 
-        File videoFile = new File(videoDir, URLDecoder.decode(fileName, "UTF8"));
-        if (!videoFile.exists()) {
+        File videoFile = resolveVideoFile(videoDir, fileName);
+        if (videoFile == null) {
+            return javax.ws.rs.core.Response.status(403).build();
+        }
+        if (!videoFile.isFile()) {
             return javax.ws.rs.core.Response.status(404).build();
         } else {
             ContentDisposition contentDisposition = ContentDisposition.type("attachment").fileName(videoFile.getName()).creationDate(new Date()).build();
@@ -102,5 +115,57 @@ public class VideosResource {
             } ).header( "Content-Disposition", contentDisposition ).build();
 
         }
+    }
+
+    /**
+     * Resolves a downloaded video name, already percent-decoded by Jersey, inside {@code videoDir}.
+     * The literal name wins. Older stored URLs wrote a space as {@code +}, which Jersey leaves literal,
+     * so a miss retries with the name form-decoded. Both lookups stay inside {@code videoDir}.
+     *
+     * @return the existing video file; otherwise the contained literal target, which is not a file;
+     *         or {@code null} when the literal name escapes {@code videoDir}.
+     */
+    static File resolveVideoFile(File videoDir, String fileName) throws java.io.UnsupportedEncodingException {
+        File literal = FileUtil.resolveContainedChild(videoDir, fileName);
+        if (literal == null || literal.isFile()) {
+            return literal;
+        }
+        String decoded;
+        try {
+            decoded = URLDecoder.decode(fileName, "UTF-8");
+        } catch (IllegalArgumentException e) {
+            return literal;
+        }
+        if (decoded.equals(fileName)) {
+            return literal;
+        }
+        File fallback = FileUtil.resolveContainedChild(videoDir, decoded);
+        if (fallback != null && fallback.isFile()) {
+            return fallback;
+        }
+        return literal;
+    }
+
+    /**
+     * Last path segment only. A multipart name may carry a Windows path; the video directory is flat.
+     */
+    static String videoFileName(String uploadedName) {
+        if (uploadedName == null) {
+            return null;
+        }
+        String normalized = uploadedName.replace('\\', '/').trim();
+        int slash = normalized.lastIndexOf('/');
+        String name = slash >= 0 ? normalized.substring(slash + 1) : normalized;
+        if (name.isEmpty() || ".".equals(name) || "..".equals(name)) {
+            return null;
+        }
+        return name;
+    }
+
+    /**
+     * Encode a single path segment. {@code URLEncoder} writes a space as {@code +}, which Jersey leaves literal.
+     */
+    static String encodeVideoPathSegment(String name) throws java.io.UnsupportedEncodingException {
+        return URLEncoder.encode(name, "UTF-8").replace("+", "%20");
     }
 }

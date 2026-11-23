@@ -59,6 +59,11 @@ public class APKFileAnalyzer {
     private final String aaptCommand;
 
     /**
+     * <p>Base directory for customer files; used to confirm absolute APK paths stay in an expected location.</p>
+     */
+    private final File filesDirectory;
+
+    /**
      * Pattern matcher to parse the first line of aapt
      */
     Pattern pattern = Pattern.compile("(\\w+)=\\'([^\\']*)\\'");
@@ -67,8 +72,10 @@ public class APKFileAnalyzer {
      * <p>Constructs new <code>APKFileAnalyzer</code> instance. This implementation does nothing.</p>
      */
     @Inject
-    public APKFileAnalyzer(@Named("aapt.command") String aaptCommand) {
+    public APKFileAnalyzer(@Named("aapt.command") String aaptCommand,
+                           @Named("files.directory") String filesDirectory) {
         this.aaptCommand = aaptCommand;
+        this.filesDirectory = new File(filesDirectory);
     }
 
     /**
@@ -79,11 +86,20 @@ public class APKFileAnalyzer {
      *         error.
      */
     public APKFileDetails analyzeFile(String filePath) {
-        String realFileName = filePath.endsWith(".temp") ? FileUtil.getNameFromTmpPath(filePath) : filePath;
+        // Staged uploads live in the upload temp directory; committed files live under files.directory.
+        String stagedRoot = FileUtil.uploadTempDirectoryPath(this.filesDirectory.getPath());
+        File stagedDir = stagedRoot.isEmpty() ? null : new File(stagedRoot);
+        File safeFile = FileUtil.confirmContainedInAny(new File(filePath), stagedDir, this.filesDirectory);
+        if (safeFile == null) {
+            throw new APKFileAnalyzerException("Refusing to analyze file outside allowed directories",
+                    new SecurityException(filePath));
+        }
+        String safePath = safeFile.getAbsolutePath();
+        String realFileName = safePath.endsWith(".temp") ? FileUtil.getNameFromTmpPath(safePath) : safePath;
         if (realFileName.endsWith(".xapk")) {
-            return analyzeXapkFile(filePath);
+            return analyzeXapkFile(safeFile);
         } else {
-            return analyzeApkFile(filePath);
+            return analyzeApkFile(safePath);
         }
     }
 
@@ -288,9 +304,9 @@ public class APKFileAnalyzer {
      * @param filePath an absolute path to an XAPK-file to be analyzed.
      * @throws APKFileAnalyzerException if an unexpected error occurs
      */
-    private APKFileDetails analyzeXapkFile(String filePath) {
+    private APKFileDetails analyzeXapkFile(File file) {
         try {
-            ZipFile zipFile = new ZipFile(filePath);
+            ZipFile zipFile = new ZipFile(file);
             Enumeration<? extends ZipEntry> entries = zipFile.entries();
 
             while(entries.hasMoreElements()) {
@@ -313,7 +329,7 @@ public class APKFileAnalyzer {
             throw new APKFileAnalyzerException("Missing manifest in XAPK-file", new Exception());
 
         } catch (Exception e) {
-            log.error("Unexpected error while analyzing XAPK-file: {}", filePath, e);
+            log.error("Unexpected error while analyzing XAPK-file: {}", file.getAbsolutePath(), e);
             throw new APKFileAnalyzerException("Unexpected error while analyzing XAPK-file", e);
         }
     }

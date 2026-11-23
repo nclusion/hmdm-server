@@ -40,6 +40,7 @@ import com.hmdm.persistence.ApplicationDAO;
 import com.hmdm.rest.filter.PublicIPFilter;
 import com.hmdm.rest.json.Response;
 import com.hmdm.util.CryptoUtil;
+import com.hmdm.util.FileUtil;
 import org.apache.poi.util.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -106,8 +107,13 @@ public class DownloadFilesServlet extends HttpServlet {
             }
         }
 
-        File file = new File(String.format("%s/%s", this.filesDirectory, path));
-        if (file.exists()) {
+        File file = FileUtil.resolveContainedChild(this.baseDirectory, path);
+        if (file == null) {
+            log.warn("Rejected path outside files directory");
+            resp.sendError(403);
+            return;
+        }
+        if (file.isFile()) {
 
             long modifiedSince = req.getDateHeader("If-Modified-Since");
             if (modifiedSince != -1 && modifiedSince > file.lastModified()) {

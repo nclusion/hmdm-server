@@ -118,11 +118,10 @@ public class ConfigurationFileResource {
                     if (!customerFilesDirectory.exists()) {
                         customerFilesDirectory.mkdirs();
                     }
-                    // For some reason, the browser sends the file name in ISO_8859_1, so we use a workaround to convert
-                    // it to UTF_8 and enable non-ASCII characters
-                    // https://stackoverflow.com/questions/50582435/jersey-filename-encoded
-                    String fileName = new String(fileDetail.getFileName().getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
-                    File configFile = new File(customerFilesDirectory, fileName);
+                    File configFile = configFileTarget(customerFilesDirectory, fileDetail.getFileName());
+                    if (configFile == null) {
+                        return Response.PERMISSION_DENIED();
+                    }
 
                     if (configFile.exists()) {
                         logger.warn("The file already exists and will be overwritten: {}", configFile.getAbsolutePath());
@@ -177,6 +176,17 @@ public class ConfigurationFileResource {
             logger.error("Unexpected error when handling icon file upload", e);
             return Response.INTERNAL_ERROR();
         }
+    }
+
+    /**
+     * @return the upload target inside {@code customerFilesDirectory}, or {@code null} when the uploaded name escapes it.
+     */
+    static File configFileTarget(File customerFilesDirectory, String uploadedName) {
+        // For some reason, the browser sends the file name in ISO_8859_1, so we use a workaround to convert
+        // it to UTF_8 and enable non-ASCII characters
+        // https://stackoverflow.com/questions/50582435/jersey-filename-encoded
+        String fileName = new String(uploadedName.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
+        return FileUtil.resolveContainedChild(customerFilesDirectory, fileName);
     }
 
 }

@@ -196,9 +196,19 @@ public class UpdateResource {
                 conn.setRequestProperty("Authorization", basicAuth);
             }
 
-            File file = new File(filesDirectory, getFileNameFromUrl(app.getUrl()));
+            File file = FileUtil.resolveContainedChild(new File(filesDirectory), getFileNameFromUrl(app.getUrl()));
+            if (file == null) {
+                logger.warn("Refusing to write update file outside files directory: {}", getFileNameFromUrl(app.getUrl()));
+                return false;
+            }
+            File parent = file.getParentFile();
+            if (parent != null) {
+                parent.mkdirs();
+            }
             inputStream = conn.getInputStream();
-            FileUtil.writeToFile(conn.getInputStream(), file.getAbsolutePath());
+            if (!FileUtil.writeToFile(conn.getInputStream(), file)) {
+                return false;
+            }
 
             createWebManifest(app);
 
@@ -243,7 +253,12 @@ public class UpdateResource {
 
             // We download to the temp file to reuse the existing Application management API
             File tempFile = FileUtil.createTempFile(this.filesDirectory, FileUtil.adjustFileName(name));
-            FileUtil.writeToFile(new URL(app.getUrl()).openStream(), tempFile.getAbsolutePath());
+            try (InputStream apkStream = new URL(app.getUrl()).openStream()) {
+                if (!FileUtil.writeToFile(apkStream, tempFile)) {
+                    tempFile.delete();
+                    return false;
+                }
+            }
 
             APKFileDetails fileDetails = apkFileAnalyzer.analyzeFile(tempFile.getAbsolutePath());
 

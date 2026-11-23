@@ -167,7 +167,13 @@ public class PublicResource {
                     errors.add("fileName");
                 }
             }
-            if (!FileUtil.isSafePath(request.getLocalPath()) || !FileUtil.isSafePath(request.getFileName())) {
+            // Empty localPath/fileName means "no path" on a metadata-only upload.
+            // isSafePath rejects "", so only validate values that were actually sent.
+            boolean unsafeLocalPath = request.getLocalPath() != null && !request.getLocalPath().isEmpty()
+                    && !FileUtil.isSafePath(request.getLocalPath());
+            boolean unsafeFileName = request.getFileName() != null && !request.getFileName().isEmpty()
+                    && !FileUtil.isSafePath(request.getFileName());
+            if (unsafeLocalPath || unsafeFileName) {
                 logger.error("Attempt to upload a file to unsafe path! local path: " + request.getLocalPath() +
                         " File name: " + request.getFileName());
                 return Response.PERMISSION_DENIED();
@@ -188,8 +194,7 @@ public class PublicResource {
             if (!expectedHash.equalsIgnoreCase(hash)) {
                 logger.error("Hash invalid for upload app request from device {}. Expected: {} but got {}",
                         deviceId, expectedHash, hash.toUpperCase());
-    //            System.out.println("Hash invalid: " + expectedHash + " vs " + hash);
-    //            return Response.ERROR("Invalid hash"); // TODO : ISV : Commented for now #5854
+                return Response.ERROR("Invalid hash");
             }
 
             // Find device and get the customer
@@ -212,17 +217,25 @@ public class PublicResource {
 
             boolean fileUploaded = false;
             if (fileDetail != null && !fileDetail.getFileName().isEmpty() && uploadedInputStream != null) {
-                File uploadFile = new File(
-                        new File(new File(this.filesDirectory, customer.getFilesDir()), request.getLocalPath()), request.getFileName()
-                );
+                File filesBase = new File(this.filesDirectory);
+                File customerBase = FileUtil.resolveContainedFile(filesBase, customer.getFilesDir());
+                File uploadFile = customerBase == null ? null
+                        : FileUtil.resolveContainedChild(customerBase, request.getLocalPath(), request.getFileName());
+                if (uploadFile == null) {
+                    logger.error("Attempt to upload a file outside the customer files directory");
+                    return Response.PERMISSION_DENIED();
+                }
 
                 File parentFile = uploadFile.getParentFile();
-                if (!parentFile.exists()) {
+                if (parentFile != null && !parentFile.exists()) {
                     parentFile.mkdirs();
                 }
 
-                if (parentFile.exists() && parentFile.isDirectory()) {
-                    writeToFile(uploadedInputStream, uploadFile.getAbsolutePath());
+                if (parentFile != null && parentFile.exists() && parentFile.isDirectory()) {
+                    if (!writeToFile(uploadedInputStream, uploadFile)) {
+                        logger.error("Failed to write uploaded file to {}", uploadFile.getAbsolutePath());
+                        return Response.INTERNAL_ERROR();
+                    }
                     fileUploaded = true;
                 } else {
                     logger.error("Can not save the file on server in directory: {}", parentFile);
