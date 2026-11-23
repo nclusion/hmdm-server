@@ -86,8 +86,10 @@ public class APKFileAnalyzer {
      *         error.
      */
     public APKFileDetails analyzeFile(String filePath) {
-        File tmpDir = new File(System.getProperty("java.io.tmpdir"));
-        File safeFile = FileUtil.confirmContainedInAny(new File(filePath), tmpDir, this.filesDirectory);
+        // Staged uploads live in the upload temp directory; committed files live under files.directory.
+        String stagedRoot = FileUtil.uploadTempDirectoryPath(this.filesDirectory.getPath());
+        File stagedDir = stagedRoot.isEmpty() ? null : new File(stagedRoot);
+        File safeFile = FileUtil.confirmContainedInAny(new File(filePath), stagedDir, this.filesDirectory);
         if (safeFile == null) {
             throw new APKFileAnalyzerException("Refusing to analyze file outside allowed directories",
                     new SecurityException(filePath));

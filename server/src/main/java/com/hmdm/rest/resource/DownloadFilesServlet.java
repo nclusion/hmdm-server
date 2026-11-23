@@ -123,7 +123,9 @@ public class DownloadFilesServlet extends HttpServlet {
             }
 
             String range = req.getHeader("Range");
-            if (range != null && range.startsWith("bytes=")) {
+            // Multi-range is unsupported (no multipart/byteranges). Per RFC 7233 §3.3,
+            // ignore Range and serve the full representation instead of a partial 206.
+            if (range != null && range.startsWith("bytes=") && range.indexOf(',') < 0) {
                 sendPartialContent(range.substring(6), file, resp);
                 return;
             }
@@ -154,22 +156,23 @@ public class DownloadFilesServlet extends HttpServlet {
 
     private void sendPartialContent(String rangeStr, File file, HttpServletResponse resp) {
         try {
-            String[] range = rangeStr.split("-");
-            Long start = Long.parseLong(range[0]);
-            Long end = null;
-            if (range.length > 1) {
-                end = Long.parseLong(range[1]);
+            long length = file.length();
+            ResolvedByteRange range = resolveByteRange(rangeStr, length);
+            if (range == null) {
+                resp.setStatus(HttpServletResponse.SC_REQUESTED_RANGE_NOT_SATISFIABLE);
+                resp.setHeader("Content-Range", "bytes */" + length);
+                return;
             }
+
+            long start = range.start;
+            long end = range.end;
+            long contentLength = range.contentLength;
+
             InputStream input = new FileInputStream(file);
             ServletOutputStream outputStream = resp.getOutputStream();
-            long length = file.length();
-            if (end == null) {
-                end = length;
-            }
 
             resp.setStatus(206);
             resp.setHeader("Content-Range", "bytes " + start + "-" + end + "/" + length);
-            long contentLength = end - start;
             if (length <= 2147483647L) {
                 resp.setContentLength((int)contentLength);
             } else {
@@ -186,6 +189,94 @@ public class DownloadFilesServlet extends HttpServlet {
 
         } catch (Exception e) {
             e.printStackTrace();
+        }
+    }
+
+    /**
+     * Parses the value after {@code bytes=} and validates it against {@code length}.
+     * Returns {@code null} when the range is malformed or unsatisfiable (caller sends 416).
+     *
+     * <p>Preserves the historical half-open convention used by this servlet: when the
+     * client omits the end, {@code end} defaults to {@code length} and
+     * {@code contentLength = end - start}. That differs from RFC 7233 inclusive ends
+     * (default end {@code length - 1}, length {@code end - start + 1}); do not change
+     * without confirming launcher resume clients.</p>
+     */
+    static ResolvedByteRange resolveByteRange(String rangeStr, long length) {
+        if (rangeStr == null || length <= 0) {
+            return null;
+        }
+
+        String single = rangeStr.trim();
+        // Caller should ignore multi-range headers and serve 200; never truncate to the
+        // first subrange (that would return a silent single-part 206 for a multi-range ask).
+        if (single.isEmpty() || single.indexOf(',') >= 0) {
+            return null;
+        }
+
+        try {
+            long start;
+            long end;
+
+            if (single.charAt(0) == '-') {
+                // Suffix form: bytes=-N (last N bytes).
+                if (single.length() == 1) {
+                    return null;
+                }
+                long suffixLength = Long.parseLong(single.substring(1).trim());
+                if (suffixLength <= 0) {
+                    return null;
+                }
+                if (suffixLength > length) {
+                    suffixLength = length;
+                }
+                start = length - suffixLength;
+                end = length;
+            } else {
+                int dash = single.indexOf('-');
+                if (dash <= 0) {
+                    return null;
+                }
+                start = Long.parseLong(single.substring(0, dash).trim());
+                String endPart = single.substring(dash + 1).trim();
+                if (endPart.isEmpty()) {
+                    end = length;
+                } else {
+                    end = Long.parseLong(endPart);
+                }
+            }
+
+            // RFC 7233: last-byte-pos beyond EOF is clamped; 416 is for first-byte-pos
+            // out of range. Under the historical half-open convention, clamp to length.
+            if (end > length) {
+                end = length;
+            }
+
+            // Half-open historical bounds: 0 <= start <= end <= length and start < length.
+            // (Inclusive RFC form would be 0 <= start <= end < length after defaulting end.)
+            if (start < 0 || end < start || start >= length) {
+                return null;
+            }
+
+            return new ResolvedByteRange(start, end);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /**
+     * A byte range resolved against a resource length under this servlet's historical
+     * half-open arithmetic ({@code contentLength = end - start}).
+     */
+    static final class ResolvedByteRange {
+        final long start;
+        final long end;
+        final long contentLength;
+
+        ResolvedByteRange(long start, long end) {
+            this.start = start;
+            this.end = end;
+            this.contentLength = end - start;
         }
     }
 }

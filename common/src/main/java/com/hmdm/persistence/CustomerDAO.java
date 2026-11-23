@@ -207,7 +207,7 @@ public class CustomerDAO {
 
             userDAO.insert(user);
             log.info("Created customer account: {}", customer);
-            log.info("Created customer admin account: {}/{}", user.getLogin(), password);
+            log.info("Created customer admin account: {}", user.getLogin());
 
             // Copy design settings if required
             Settings customerSettings = new Settings();

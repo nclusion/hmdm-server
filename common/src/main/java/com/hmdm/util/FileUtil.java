@@ -26,7 +26,14 @@ import com.hmdm.persistence.domain.Customer;
 import java.io.*;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileStore;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.util.EnumSet;
+import java.util.Set;
 
 /**
  * <p>An utility class for managing the files on local file system.</p>
@@ -35,6 +42,17 @@ import java.nio.file.Path;
  */
 public final class FileUtil {
     private static final String TEMP_FILE_DELIMITER = "1111111";
+
+    /**
+     * <p>Directory, next to {@code files.directory}, that holds upload temp files.</p>
+     */
+    static final String UPLOAD_TMP_DIR_NAME = ".hmdm-upload-tmp";
+
+    private static final Set<PosixFilePermission> OWNER_ONLY_DIR_PERMISSIONS =
+            EnumSet.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_EXECUTE);
+
+    private static final Set<PosixFilePermission> OWNER_ONLY_FILE_PERMISSIONS =
+            EnumSet.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE);
 
     /**
      * <p>Constructs new <code>FileUtil</code> instance. This implementation does nothing.</p>
@@ -51,8 +69,108 @@ public final class FileUtil {
                 .replace(")", "");
     }
 
-    public static File createTempFile(String fileName) throws IOException {
-        return File.createTempFile(fileName + TEMP_FILE_DELIMITER, ".temp");
+    /**
+     * <p>Creates an upload temp file in an application-owned directory beside
+     * {@code filesDirectory}, not in the shared system temp directory. The directory is
+     * {@code 0700} and the file is {@code 0600} where POSIX permissions are supported.
+     * The recoverable name is the sanitized prefix before {@link #TEMP_FILE_DELIMITER}.</p>
+     *
+     * @param filesDirectory configured {@code files.directory} root.
+     * @param fileName client-supplied name used as the recoverable prefix.
+     * @return the created temporary file.
+     * @throws IOException if the directory or the file cannot be created.
+     */
+    public static File createTempFile(String filesDirectory, String fileName) throws IOException {
+        Path uploadTmpDir = ensureUploadTempDirectory(filesDirectory);
+        String prefix = sanitizeTempFilePrefix(fileName) + TEMP_FILE_DELIMITER;
+        Path tempFile;
+        if (supportsPosixPermissions(uploadTmpDir)) {
+            tempFile = Files.createTempFile(
+                    uploadTmpDir,
+                    prefix,
+                    ".temp",
+                    PosixFilePermissions.asFileAttribute(OWNER_ONLY_FILE_PERMISSIONS));
+        } else {
+            tempFile = Files.createTempFile(uploadTmpDir, prefix, ".temp");
+        }
+        return tempFile.toFile();
+    }
+
+    /**
+     * <p>Absolute path of the upload temp directory for {@code filesDirectory}.
+     * Does not create the directory.</p>
+     */
+    public static String uploadTempDirectoryPath(String filesDirectory) {
+        if (filesDirectory == null || filesDirectory.trim().isEmpty()) {
+            return "";
+        }
+        Path base = Paths.get(filesDirectory).toAbsolutePath().normalize();
+        Path parent = base.getParent();
+        if (parent == null) {
+            return "";
+        }
+        return parent.resolve(UPLOAD_TMP_DIR_NAME).toString();
+    }
+
+    /**
+     * <p>Creates the upload temp directory with owner-only permissions where POSIX is supported.</p>
+     */
+    static Path ensureUploadTempDirectory(String filesDirectory) throws IOException {
+        String directoryPath = uploadTempDirectoryPath(filesDirectory);
+        if (directoryPath.isEmpty()) {
+            throw new IOException("files.directory is not configured");
+        }
+        Path tmpDir = Paths.get(directoryPath);
+        Files.createDirectories(tmpDir);
+        if (supportsPosixPermissions(tmpDir)) {
+            Files.setPosixFilePermissions(tmpDir, OWNER_ONLY_DIR_PERMISSIONS);
+        }
+        return tmpDir;
+    }
+
+    /**
+     * <p>Replaces path separators and NUL so the prefix is one path component.
+     * Other characters, including a {@code ".."} sequence inside a file name, are kept
+     * so {@link #getNameFromTmpPath(String)} returns that name.</p>
+     */
+    static String sanitizeTempFilePrefix(String fileName) {
+        if (fileName == null || fileName.isEmpty()) {
+            return "upload";
+        }
+        return fileName
+                .replace("/", "_")
+                .replace("\\", "_")
+                .replace("\0", "_");
+    }
+
+    /**
+     * <p>True when {@code path} is a direct child of the upload temp directory.
+     * A file name may contain {@code ".."} as text. A {@code ".."} path segment may not.</p>
+     */
+    public static boolean isStagedTempPath(String filesDirectory, String path) {
+        String stagedRoot = uploadTempDirectoryPath(filesDirectory);
+        if (path == null || stagedRoot.isEmpty()) {
+            return false;
+        }
+        String prefix = stagedRoot + File.separator;
+        if (!path.startsWith(prefix)) {
+            return false;
+        }
+        String name = path.substring(prefix.length());
+        return !name.isEmpty()
+                && name.indexOf('/') < 0
+                && name.indexOf('\\') < 0
+                && !".".equals(name)
+                && !"..".equals(name);
+    }
+
+    private static boolean supportsPosixPermissions(Path path) {
+        try {
+            FileStore store = Files.getFileStore(path);
+            return store.supportsFileAttributeView("posix");
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     /**
@@ -101,17 +219,6 @@ public final class FileUtil {
         return writeToFile(uploadedInputStream, destination);
     }
 
-    /**
-     * @deprecated Prefer {@link #writeToFile(InputStream, File)} after resolving with
-     * {@link #resolveContainedFile(File, String)}. This overload accepts an absolute path only when it stays under
-     * the JVM temporary directory.
-     */
-    @Deprecated
-    public static void writeToFile(InputStream uploadedInputStream, String uploadedFileLocation) {
-        File tmpDir = new File(System.getProperty("java.io.tmpdir"));
-        writeToFile(uploadedInputStream, tmpDir, uploadedFileLocation);
-    }
-
     public static String getNameFromTmpPath(String tmpFilePath) {
         File localFile = new File(tmpFilePath);
         if (!localFile.getName().contains(TEMP_FILE_DELIMITER)) {
@@ -131,9 +238,12 @@ public final class FileUtil {
      * @throws FileExistsException if file already exists in
      */
     public static File moveFile(Customer customer, String filesDirectory, String localPath, String tmpFilePath) {
-        // A textual startsWith(tmpdir) check accepts "<tmpdir>/../outside" and "<tmpdir>-sibling".
-        File tmpDir = new File(System.getProperty("java.io.tmpdir"));
-        File localFile = confirmContained(tmpDir, tmpFilePath);
+        // The source must be a staged upload: a file in the upload temp directory of filesDirectory.
+        String stagedRoot = uploadTempDirectoryPath(filesDirectory);
+        if (stagedRoot.isEmpty()) {
+            return null;
+        }
+        File localFile = confirmContained(new File(stagedRoot), tmpFilePath);
         if (localFile == null || !localFile.isFile()) {
             return null;
         }

@@ -188,16 +188,15 @@ public class FileUtilPathContainmentTests {
     }
 
     @Test
-    public void moveFileRejectsSourceOutsideTmp() throws IOException {
+    public void moveFileRejectsSourceOutsideUploadTemp() throws IOException {
         File files = temporaryFolder.newFolder("customer-files");
-        String tmpProperty = System.getProperty("java.io.tmpdir");
-        String separator = tmpProperty.endsWith(File.separator) ? "" : File.separator;
-        // Textual prefix matches java.io.tmpdir; the canonical path does not.
-        String escaped = tmpProperty + separator + "a/../../hmdm-outside-not-a-file";
+        String stagedRoot = FileUtil.uploadTempDirectoryPath(files.getAbsolutePath());
+        // Textual prefix matches the upload temp directory; the canonical path does not.
+        String escaped = stagedRoot + File.separator + "a/../../hmdm-outside-not-a-file";
         File canonical = new File(escaped).getCanonicalFile();
-        File tmpCanonical = new File(tmpProperty).getCanonicalFile();
-        Assert.assertFalse(canonical.equals(tmpCanonical));
-        Assert.assertFalse(canonical.getPath().startsWith(tmpCanonical.getPath() + File.separator));
+        File stagedCanonical = new File(stagedRoot).getCanonicalFile();
+        Assert.assertFalse(canonical.equals(stagedCanonical));
+        Assert.assertFalse(canonical.getPath().startsWith(stagedCanonical.getPath() + File.separator));
 
         Customer customer = new Customer();
         customer.setFilesDir(null);
@@ -207,9 +206,24 @@ public class FileUtilPathContainmentTests {
     }
 
     @Test
+    public void moveFileRejectsSystemTempFile() throws IOException {
+        File files = temporaryFolder.newFolder("customer-files-systmp");
+        File systemTemp = File.createTempFile("app.apk1111111", ".temp");
+        try {
+            Customer customer = new Customer();
+            customer.setFilesDir("");
+            File moved = FileUtil.moveFile(customer, files.getAbsolutePath(), "/", systemTemp.getAbsolutePath());
+            Assert.assertNull(moved);
+            Assert.assertTrue(systemTemp.exists());
+        } finally {
+            systemTemp.delete();
+        }
+    }
+
+    @Test
     public void moveFileAcceptsRealTempFile() throws IOException {
         File files = temporaryFolder.newFolder("customer-files-ok");
-        File temp = FileUtil.createTempFile("app.apk");
+        File temp = FileUtil.createTempFile(files.getAbsolutePath(), "app.apk");
         try {
             writeBytes(temp, "apk".getBytes(StandardCharsets.UTF_8));
             Customer customer = new Customer();
