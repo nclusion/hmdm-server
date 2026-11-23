@@ -30,6 +30,7 @@ import org.glassfish.jersey.media.multipart.FormDataParam;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
+import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.util.Date;
 import javax.ws.rs.Consumes;
@@ -97,8 +98,7 @@ public class VideosResource {
             videoDir.mkdirs();
         }
 
-        // Jersey already percent-decodes @PathParam; do not decode again.
-        File videoFile = FileUtil.resolveContainedChild(videoDir, fileName);
+        File videoFile = resolveVideoFile(videoDir, fileName);
         if (videoFile == null) {
             return javax.ws.rs.core.Response.status(403).build();
         }
@@ -115,6 +115,35 @@ public class VideosResource {
             } ).header( "Content-Disposition", contentDisposition ).build();
 
         }
+    }
+
+    /**
+     * Resolves a downloaded video name, already percent-decoded by Jersey, inside {@code videoDir}.
+     * The literal name wins. Older stored URLs wrote a space as {@code +}, which Jersey leaves literal,
+     * so a miss retries with the name form-decoded. Both lookups stay inside {@code videoDir}.
+     *
+     * @return the existing video file; otherwise the contained literal target, which is not a file;
+     *         or {@code null} when the literal name escapes {@code videoDir}.
+     */
+    static File resolveVideoFile(File videoDir, String fileName) throws java.io.UnsupportedEncodingException {
+        File literal = FileUtil.resolveContainedChild(videoDir, fileName);
+        if (literal == null || literal.isFile()) {
+            return literal;
+        }
+        String decoded;
+        try {
+            decoded = URLDecoder.decode(fileName, "UTF-8");
+        } catch (IllegalArgumentException e) {
+            return literal;
+        }
+        if (decoded.equals(fileName)) {
+            return literal;
+        }
+        File fallback = FileUtil.resolveContainedChild(videoDir, decoded);
+        if (fallback != null && fallback.isFile()) {
+            return fallback;
+        }
+        return literal;
     }
 
     /**
